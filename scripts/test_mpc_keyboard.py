@@ -133,7 +133,8 @@ def _render(window, scn, cam, opt, model, data, ctx):
 
 
 def _stand_up(world, target_q, kp=80.0, kd=2.0, max_iter=500):
-    """PD 收敛到目标关节角."""
+    """PD 收敛到目标关节角，返回是否步进过."""
+    stepped = False
     for _ in range(max_iter):
         cq = world.get_qpos(GO2_LEG_JOINTS)
         cdq = world.get_qvel(GO2_LEG_JOINTS)
@@ -142,6 +143,20 @@ def _stand_up(world, target_q, kp=80.0, kd=2.0, max_iter=500):
         tau = kp * (target_q - cq) - kd * cdq
         world.set_ctrl(GO2_ACTUATORS, tau)
         world.step(10)
+        stepped = True
+    world.forward()
+    return stepped
+
+
+def _stance_hold(world, target_q, hold_sim_s, ctrl_dt, sub, kp=60.0, kd=1.5):
+    """姿态稳定期：PD 保持关节角不松手，跑足 hold_sim_s 秒物理."""
+    n_steps = int(hold_sim_s / ctrl_dt)
+    for i in range(n_steps):
+        cq = world.get_qpos(GO2_LEG_JOINTS)
+        cdq = world.get_qvel(GO2_LEG_JOINTS)
+        tau = kp * (target_q - cq) - kd * cdq
+        world.set_ctrl(GO2_ACTUATORS, tau)
+        world.step(sub)
     world.forward()
 
 
@@ -196,9 +211,12 @@ def main():
     window, scn, cam, opt, ctx = _init_window(model, data)
     print("OK")
 
-    # 4. 站立
+    # 4. 站立 + 姿态保持
     print("[4] 站立...", end=" ", flush=True)
     _stand_up(world, MPC_STAND_ANGLES)
+    print("", flush=True)
+    print("[4.5] 姿态稳定保持 (PD, 1.5s 仿真实时)...", end=" ", flush=True)
+    _stance_hold(world, MPC_STAND_ANGLES, hold_sim_s=1.5, ctrl_dt=ctrl_dt, sub=sub)
     mpc.reset()
     print("OK")
 
@@ -224,6 +242,7 @@ def main():
             elif k == glfw.KEY_R:
                 cmd_vel[:] = 0.0
                 _stand_up(world, MPC_STAND_ANGLES)
+                _stance_hold(world, MPC_STAND_ANGLES, hold_sim_s=1.0, ctrl_dt=ctrl_dt, sub=sub)
                 mpc.reset()
                 last_mpc = data.time - ctrl_dt
                 print(f"  ↩ 重新站立  wall_t={time.time() - t_start:.1f}s", flush=True)
