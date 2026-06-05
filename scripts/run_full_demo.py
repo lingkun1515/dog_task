@@ -223,7 +223,7 @@ def main():
     print(f"OK (nq={world.model.nq}, nbody={world.model.nbody})")
 
     # 3. 初始化模块
-    mob = Go2MujocoMobility({"control_mode": "rl", "control_hz": 50}, world)
+    mob = Go2MujocoMobility({"control_mode": "mpc", "control_hz": 50}, world)
     cam = MujocoCameraSim(
         {"detection_mode": "ground_truth", "render_fps": 15,
          "width": 848, "height": 480, "push_to_ui": True},

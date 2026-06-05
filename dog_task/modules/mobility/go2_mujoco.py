@@ -1,7 +1,8 @@
 """Go2MujocoMobility: MuJoCo 仿真 Go2 底盘，实现 MobilityController 协议.
 
 控制模式:
-  - "rl": 用 ONNX RL 策略推理关节力矩驱动（接近真机行为）
+  - "rl": 用 ONNX RL 策略推理关节角度目标 → PD 力矩控制
+  - "mpc": Convex Centroidal MPC 直接力矩控制 (需要 go2_mpc.xml 模型)
 """
 
 from __future__ import annotations
@@ -26,6 +27,21 @@ from ...core.models import (
 from ..sim.world import SimWorld
 
 logger = logging.getLogger(__name__)
+
+# MPC 站立目标角度 (leg-grouped): 大腿 0.9 rad = MuJoCo 自然平衡姿态
+MPC_STAND_ANGLES = np.array([
+    0.0, 0.9, -1.8,
+    0.0, 0.9, -1.8,
+    0.0, 0.9, -1.8,
+    0.0, 0.9, -1.8,
+], dtype=np.float32)
+
+MPC_SIT_ANGLES = np.array([
+    0.0, 1.57, -2.5,
+    0.0, 1.57, -2.5,
+    0.0, 1.57, -2.5,
+    0.0, 1.57, -2.5,
+], dtype=np.float32)
 
 GO2_LEG_JOINTS = [
     "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
@@ -87,7 +103,7 @@ class Go2MujocoMobility:
     def __init__(self, config: Mapping[str, Any], world: SimWorld) -> None:
         self._world = world
         self._config = dict(config)
-        self._control_mode = self._config.get("control_mode", "rl")
+        self._control_mode = self._config.get("control_mode", "mpc")
         self._stop_velocity_threshold = self._config.get("stop_velocity_threshold", 0.05)
 
         self._cmd_vel = np.zeros(3)  # [vx, vy, vyaw]
@@ -100,12 +116,15 @@ class Go2MujocoMobility:
         self._kp = self._config.get("kp", 20.0)
         self._kd = self._config.get("kd", 0.5)
 
+        self._mpc_ctrl = None
         self._running = False
         self._control_thread: Optional[threading.Thread] = None
 
     def healthcheck(self) -> HealthStatus:
         try:
             self._world.joint_id("FL_hip_joint")
+            if self._control_mode == "mpc":
+                return self._healthcheck_mpc()
             import importlib.util
             if importlib.util.find_spec("onnxruntime") is None:
                 return HealthStatus(ready=False, message="onnxruntime not installed")
@@ -117,6 +136,22 @@ class Go2MujocoMobility:
             return HealthStatus(ready=True, message="Go2 MuJoCo (rl)")
         except Exception as e:
             return HealthStatus(ready=False, message=str(e))
+
+    def _healthcheck_mpc(self) -> HealthStatus:
+        try:
+            import casadi
+        except ImportError:
+            return HealthStatus(ready=False, message="casadi not installed")
+        try:
+            import pinocchio
+        except ImportError:
+            return HealthStatus(ready=False, message="pinocchio not installed")
+        try:
+            from .mpc_controller import MpcController
+            MpcController(control_hz=self._control_hz)
+        except Exception as e:
+            return HealthStatus(ready=False, message=f"MPC init failed: {e}")
+        return HealthStatus(ready=True, message="Go2 MuJoCo (mpc)")
 
     def capabilities(self) -> MobilityCapabilities:
         return MobilityCapabilities(
@@ -168,9 +203,43 @@ class Go2MujocoMobility:
         self._posture = posture
 
         if posture == "stand_down":
+            if self._control_mode == "mpc":
+                self._apply_posture_mpc(MPC_SIT_ANGLES)
+                return ActionResult(success=True, message="posture=stand_down (mpc)")
             return ActionResult(success=True, message="posture=stand_down (ignored in RL mode)")
+
+        if self._control_mode == "mpc":
+            self._apply_posture_mpc(MPC_STAND_ANGLES)
+            return ActionResult(success=True, message="posture=stand (mpc)")
         self._apply_posture_rl()
         return ActionResult(success=True, message="posture=stand")
+
+    def _apply_posture_mpc(self, target_q: np.ndarray) -> None:
+        """MPC 姿态控制：停止控制循环，用 PD 收敛到目标角度，重置 MPC."""
+        was_running = self._running
+        self._running = False
+        if self._control_thread is not None:
+            self._control_thread.join(timeout=1.0)
+            self._control_thread = None
+
+        stand_kp, stand_kd = 80.0, 2.0
+        for _ in range(500):
+            current_q = self._world.get_qpos(GO2_LEG_JOINTS)
+            current_dq = self._world.get_qvel(GO2_LEG_JOINTS)
+            err = np.max(np.abs(target_q - current_q))
+            if err < 0.01:
+                break
+            tau = stand_kp * (target_q - current_q) - stand_kd * current_dq
+            self._world.set_ctrl(GO2_ACTUATORS, tau)
+            self._world.step(10)
+        self._world.forward()
+
+        # 重置 MPC 状态
+        if self._mpc_ctrl is not None:
+            self._mpc_ctrl.reset()
+
+        if was_running:
+            self._start_control_loop()
 
     def _apply_posture_rl(self) -> None:
         """RL 模式下设置姿态：暂停控制循环，用高增益 PD 收敛到 MENAGERIE_HOME."""
@@ -242,6 +311,8 @@ class Go2MujocoMobility:
 
     def emergency_stop(self) -> ActionResult:
         self.stop()
+        if self._mpc_ctrl is not None:
+            self._mpc_ctrl.reset()
         return ActionResult(success=True, message="emergency stop")
 
     # ---- 内部控制循环 ----
@@ -260,8 +331,43 @@ class Go2MujocoMobility:
         while self._running:
             with self._lock:
                 cmd = self._cmd_vel.copy()
-            self._rl_step(cmd)
+            if self._control_mode == "mpc":
+                self._mpc_step(cmd)
+            else:
+                self._rl_step(cmd)
             time.sleep(dt)
+
+    def _mpc_step(self, cmd: np.ndarray) -> None:
+        """MPC 直接力矩控制."""
+        if self._mpc_ctrl is None:
+            self._init_mpc()
+
+        mj_qpos = np.concatenate([
+            self._world.get_freejoint_qpos("root"),
+            self._world.get_qpos(GO2_LEG_JOINTS),
+        ])
+        mj_qvel = np.concatenate([
+            self._world.get_freejoint_qvel("root"),
+            self._world.get_qvel(GO2_LEG_JOINTS),
+        ])
+
+        torque = self._mpc_ctrl.step(cmd, mj_qpos, mj_qvel)
+        self._world.set_ctrl(GO2_ACTUATORS, torque)
+
+        substeps = int(round(1.0 / (self._control_hz * self._world.model.opt.timestep)))
+        self._world.step(substeps)
+
+    def _init_mpc(self) -> None:
+        from .mpc_controller import MpcController
+        mpc_cfg = self._config.get("mpc", {})
+        self._mpc_ctrl = MpcController(
+            control_hz=self._control_hz,
+            gait_hz=mpc_cfg.get("gait_hz", 2.0),
+            gait_duty=mpc_cfg.get("gait_duty", 0.6),
+            mpc_horizon=mpc_cfg.get("mpc_horizon", 10),
+            z_des=mpc_cfg.get("z_des", 0.27),
+            verbose=mpc_cfg.get("verbose", False),
+        )
 
     def _rl_step(self, cmd: np.ndarray) -> None:
         """RL 策略推理 + PD 力矩控制."""

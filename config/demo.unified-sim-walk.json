@@ -1,7 +1,7 @@
 {
   "_comment": "walk-and-pick 演示: Go2 前进 0.5m 后目标在正前方 0.3m 处可达",
   "sim_world": {
-    "go2_xml": "assets/go2/go2_standalone.xml",
+    "go2_xml": "assets/go2/go2_mpc.xml",
     "d1_urdf": "assets/d1/d1.urdf",
     "arm_mount_pos": [0.0, 0.0, 0.10],
     "arm_mount_quat": [1, 0, 0, 0],
@@ -34,8 +34,16 @@
   },
   "mobility": {
     "driver": "go2_mujoco",
-    "control_mode": "rl",
-    "stop_velocity_threshold": 0.05
+    "control_mode": "mpc",
+    "control_hz": 50,
+    "stop_velocity_threshold": 0.05,
+    "mpc": {
+      "gait_hz": 2.0,
+      "gait_duty": 0.6,
+      "mpc_horizon": 10,
+      "z_des": 0.27,
+      "verbose": false
+    }
   },
   "arm": {
     "driver": "mujoco_unified",
