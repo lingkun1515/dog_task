@@ -151,10 +151,11 @@ class SimWorld:
 
     def set_qpos(self, names: Sequence[str], values: np.ndarray) -> None:
         """批量设置关节位置（仅 hinge 关节）."""
-        for i, name in enumerate(names):
-            jid = self.joint_id(name)
-            adr = self.model.jnt_qposadr[jid]
-            self.data.qpos[adr] = values[i]
+        with self._lock:
+            for i, name in enumerate(names):
+                jid = self.joint_id(name)
+                adr = self.model.jnt_qposadr[jid]
+                self.data.qpos[adr] = values[i]
 
     def get_qvel(self, names: Sequence[str]) -> np.ndarray:
         """批量读取关节速度."""
@@ -167,9 +168,10 @@ class SimWorld:
 
     def set_ctrl(self, names: Sequence[str], values: np.ndarray) -> None:
         """按名称设置 actuator 控制信号."""
-        for i, name in enumerate(names):
-            aid = self.actuator_id(name)
-            self.data.ctrl[aid] = values[i]
+        with self._lock:
+            for i, name in enumerate(names):
+                aid = self.actuator_id(name)
+                self.data.ctrl[aid] = values[i]
 
     def get_body_xpos(self, name: str) -> np.ndarray:
         """读取 body 世界位置."""
@@ -188,19 +190,21 @@ class SimWorld:
 
     def set_mocap_pos(self, name: str, pos: np.ndarray) -> None:
         """设置 mocap body 位置."""
-        bid = self.body_id(name)
-        mocap_id = self.model.body_mocapid[bid]
-        if mocap_id == -1:
-            raise ValueError(f"body '{name}' is not a mocap body")
-        self.data.mocap_pos[mocap_id] = pos
+        with self._lock:
+            bid = self.body_id(name)
+            mocap_id = self.model.body_mocapid[bid]
+            if mocap_id == -1:
+                raise ValueError(f"body '{name}' is not a mocap body")
+            self.data.mocap_pos[mocap_id] = pos
 
     def set_mocap_quat(self, name: str, quat: np.ndarray) -> None:
         """设置 mocap body 四元数."""
-        bid = self.body_id(name)
-        mocap_id = self.model.body_mocapid[bid]
-        if mocap_id == -1:
-            raise ValueError(f"body '{name}' is not a mocap body")
-        self.data.mocap_quat[mocap_id] = quat
+        with self._lock:
+            bid = self.body_id(name)
+            mocap_id = self.model.body_mocapid[bid]
+            if mocap_id == -1:
+                raise ValueError(f"body '{name}' is not a mocap body")
+            self.data.mocap_quat[mocap_id] = quat
 
     def reset_to_keyframe(self, name: str = "home") -> None:
         """重置到指定 keyframe."""
@@ -225,9 +229,10 @@ class SimWorld:
 
     def set_freejoint_qpos(self, qpos7: np.ndarray, joint_name: str = "root") -> None:
         """设置 freejoint 的 7D qpos."""
-        jid = self.joint_id(joint_name)
-        adr = self.model.jnt_qposadr[jid]
-        self.data.qpos[adr:adr + 7] = qpos7
+        with self._lock:
+            jid = self.joint_id(joint_name)
+            adr = self.model.jnt_qposadr[jid]
+            self.data.qpos[adr:adr + 7] = qpos7
 
     def get_freejoint_qvel(self, joint_name: str = "root") -> np.ndarray:
         """获取 freejoint 的 6D qvel [vx,vy,vz,wx,wy,wz]."""
@@ -237,6 +242,7 @@ class SimWorld:
 
     def set_freejoint_qvel(self, qvel6: np.ndarray, joint_name: str = "root") -> None:
         """设置 freejoint 的 6D qvel."""
-        jid = self.joint_id(joint_name)
-        adr = self.model.jnt_dofadr[jid]
-        self.data.qvel[adr:adr + 6] = qvel6
+        with self._lock:
+            jid = self.joint_id(joint_name)
+            adr = self.model.jnt_dofadr[jid]
+            self.data.qvel[adr:adr + 6] = qvel6

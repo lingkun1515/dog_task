@@ -175,9 +175,14 @@ class MujocoCameraSim:
         return best_obs
 
     def _detect_yolo(self, rgb: np.ndarray, depth: np.ndarray) -> Optional[TargetObservation]:
-        """对渲染帧跑 YOLO 检测."""
+        """对渲染帧跑 YOLO 检测（不可用时自动降级为 ground_truth）."""
         try:
             from .pipeline.detect import detect_targets
+        except ImportError:
+            logger.warning("YOLO pipeline not available, falling back to ground_truth")
+            self._detection_mode = "ground_truth"
+            return self._detect_ground_truth()
+        try:
             results = detect_targets(rgb)
             if not results:
                 return None
@@ -200,7 +205,9 @@ class MujocoCameraSim:
                         frame_id="camera_link",
                     )
         except Exception as e:
-            logger.warning("YOLO detection error: %s", e)
+            logger.warning("YOLO detection error: %s, falling back to ground_truth", e)
+            self._detection_mode = "ground_truth"
+            return self._detect_ground_truth()
         return None
 
     def _get_intrinsics(self) -> Tuple[float, float, float, float]:
@@ -214,17 +221,19 @@ class MujocoCameraSim:
         return fx, fy, cx, cy
 
     def _push_frame_to_ui(self, rgb: np.ndarray) -> None:
-        """推送帧到 UI SharedFrameStream（如果 UI 模块可用）."""
+        """通过 HTTP POST 推送 JPEG 帧到 UI 服务器."""
         try:
-            import sys, os
-            ui_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..", "UI")
-            if ui_dir not in sys.path:
-                sys.path.insert(0, os.path.abspath(ui_dir))
-            from camera_stream import get_stream
             import cv2
+            import urllib.request
             bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-            get_stream().push_frame(bgr)
-        except ImportError:
-            pass
+            _, jpeg = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 75])
+            data = jpeg.tobytes()
+            req = urllib.request.Request(
+                "http://127.0.0.1:8765/api/camera/frame",
+                data=data,
+                headers={"Content-Type": "application/octet-stream"},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=1.0)
         except Exception as e:
             logger.debug("UI push failed: %s", e)

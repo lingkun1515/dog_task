@@ -44,7 +44,7 @@ class UnifiedMujocoArm:
         self._world = world
         self._config = dict(config)
         urdf = self._config.get("urdf")
-        self._urdf_path = project_path(urdf) if urdf else _DEFAULT_URDF
+        self._urdf_path = project_path(urdf) if urdf else project_path(_DEFAULT_URDF)
         self._tcp_offset_m = float(self._config.get("tcp_offset_m", 0.12))
         self._approach_dir = tuple(float(v) for v in self._config.get("approach_dir", [0, 0, -1]))
         self._approach_height_m = float(self._config.get("approach_height_m", 0.15))
@@ -162,7 +162,7 @@ class UnifiedMujocoArm:
     def _apply_joints(self, q_rad: np.ndarray, gripper_frac: float) -> None:
         """设置 D1 关节角度."""
         self._world.set_qpos(_ARM_JOINTS, q_rad)
-        grip_rad = gripper_frac * 0.04
+        grip_rad = gripper_frac * 0.033
         self._world.set_qpos(_GRIPPER_JOINTS, np.array([grip_rad, grip_rad]))
 
     def _ensure_chain(self):

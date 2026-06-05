@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Mapping, Tuple
 
 import mujoco
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 from ...config import project_path
 
@@ -108,7 +109,14 @@ class SceneBuilder:
         keyframe_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_KEY, "home")
         if keyframe_id >= 0:
             mujoco.mj_resetDataKeyframe(model, data, keyframe_id)
-            mujoco.mj_forward(model, data)
+        for name in D1_ALL_JOINTS:
+            try:
+                jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
+                adr = model.jnt_qposadr[jid]
+                data.qpos[adr] = 0.0
+            except Exception:
+                pass
+        mujoco.mj_forward(model, data)
 
         logger.info(
             "Scene built: nq=%d, nv=%d, nu=%d, nbody=%d, ncam=%d",
@@ -127,7 +135,6 @@ class SceneBuilder:
         y_axis = np.array(vals[3:6])
         z_axis = np.cross(x_axis, y_axis)
         R = np.column_stack([x_axis, y_axis, z_axis])
-        from scipy.spatial.transform import Rotation
         q_xyzw = Rotation.from_matrix(R).as_quat()
         return [float(q_xyzw[3]), float(q_xyzw[0]), float(q_xyzw[1]), float(q_xyzw[2])]
 

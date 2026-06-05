@@ -137,9 +137,12 @@ class Go2MujocoMobility:
             qpos = self._world.get_freejoint_qpos("root")
             if posture == "stand":
                 qpos[2] = 0.27
+                leg_angles = GO2_DEFAULT_ANGLES
             else:
                 qpos[2] = 0.15
+                leg_angles = np.array([0.0, 1.57, -2.5] * 4)
             self._world.set_freejoint_qpos(qpos, "root")
+            self._world.set_qpos(GO2_LEG_JOINTS, leg_angles)
             self._world.forward()
         return ActionResult(success=True, message=f"posture={posture}")
 
@@ -214,7 +217,7 @@ class Go2MujocoMobility:
             time.sleep(dt)
 
     def _kinematic_step(self, cmd: np.ndarray, dt: float) -> None:
-        """运动学积分: 直接更新 freejoint qpos."""
+        """运动学积分: 直接更新 freejoint qpos 和 qvel."""
         qpos = self._world.get_freejoint_qpos("root")
         x, y, z = qpos[0], qpos[1], qpos[2]
         qw, qx, qy, qz_val = qpos[3], qpos[4], qpos[5], qpos[6]
@@ -232,6 +235,11 @@ class Go2MujocoMobility:
         sy = math.sin(new_yaw / 2)
         new_qpos = np.array([new_x, new_y, z, cy, 0, 0, sy])
         self._world.set_freejoint_qpos(new_qpos, "root")
+
+        vx = (new_x - x) / dt if dt > 0 else 0.0
+        vy = (new_y - y) / dt if dt > 0 else 0.0
+        vyaw_actual = (new_yaw - yaw) / dt if dt > 0 else 0.0
+        self._world.set_freejoint_qvel(np.array([vx, vy, 0.0, 0.0, 0.0, vyaw_actual]), "root")
 
         self._world.set_qpos(GO2_LEG_JOINTS, GO2_DEFAULT_ANGLES)
         self._world.forward()
@@ -283,10 +291,14 @@ class Go2MujocoMobility:
         return np.array([gx, gy, gz]) * (-9.81)
 
     def _load_rl_policy(self) -> None:
-        from ..sim.rl_policy import RLPolicy
-        from ...config import project_path
-        model_path = str(project_path(self._config.get("rl_model", "assets/rl_models/flat_policy_v5.onnx")))
-        self._rl_policy = RLPolicy(model_path, obs_dim=45)
+        try:
+            from ..sim.rl_policy import RLPolicy
+            from ...config import project_path
+            model_path = str(project_path(self._config.get("rl_model", "assets/rl_models/flat_policy_v5.onnx")))
+            self._rl_policy = RLPolicy(model_path, obs_dim=45)
+        except Exception as e:
+            logger.error("RL policy load failed, falling back to kinematic: %s", e)
+            self._control_mode = "kinematic"
 
     @staticmethod
     def _wrap_angle(a: float) -> float:

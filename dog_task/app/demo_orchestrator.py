@@ -82,6 +82,7 @@ class DemoOrchestrator:
         settings: WorkflowSettings,
         sleep: Callable[[float], None] = time.sleep,
         log: Callable[[str], None] = print,
+        ui_base_url: str = "http://127.0.0.1:8765",
     ) -> None:
         self.arm = arm
         self.camera = camera
@@ -91,6 +92,8 @@ class DemoOrchestrator:
         self.sleep = sleep
         self.log = log
         self._running = True
+        self._ui_base_url = ui_base_url
+        self._ui_task_dispatched = False
 
     def healthcheck(self) -> dict[str, object]:
         """分别检查三个模块, 返回 name -> HealthStatus 字典."""
@@ -112,6 +115,8 @@ class DemoOrchestrator:
 
         self._running = True
         poll_interval = 0.5
+        self._ensure_ui_task_dispatched()
+        self._sync_ui_status("go_to_B", "仿真开始，搜索目标...")
 
         while self._running:
             observation = self.camera.get_target(require_stable=True)
@@ -138,10 +143,13 @@ class DemoOrchestrator:
             self._release_camera_view()
             result = self._pick_and_place(observation, target)
             if result.success:
+                self._sync_ui_status("done", "抓取放置完成")
                 return result
+            self._sync_ui_status("go_to_B", f"抓取失败: {result.message}, 继续轮询...")
             self.log(f"抓取失败: {result.message}, 继续轮询新目标...")
             self.sleep(poll_interval)
 
+        self._sync_ui_status("failed", "轮询被外部中断")
         return ActionResult(False, "轮询被外部中断(request_stop)")
 
     def run_walk_and_pick(
@@ -155,6 +163,8 @@ class DemoOrchestrator:
             return ActionResult(False, not_ready)
 
         self.log("[1/5] Go2 站立...")
+        self._ensure_ui_task_dispatched()
+        self._sync_ui_status("go_to_B", "Go2 站立准备前进")
         stand_result = self.mobility.set_posture("stand")
         if not stand_result.success:
             return ActionResult(False, f"站立失败: {stand_result.message}")
@@ -169,6 +179,7 @@ class DemoOrchestrator:
             return ActionResult(False, f"前进失败: {walk_result.message}")
 
         self.log("[3/5] Go2 趴下, 准备抓取...")
+        self._sync_ui_status("arrived_B_confirmed", "Go2 到达目标区域，准备抓取")
         down_result = self.mobility.set_posture("stand_down")
         if not down_result.success:
             return ActionResult(False, f"趴下失败: {down_result.message}")
@@ -181,16 +192,34 @@ class DemoOrchestrator:
         return pick_result
 
     def _walk_by_velocity(self, distance_m: float, speed_mps: float) -> ActionResult:
-        """降级方案: 用 set_velocity + 时间估算实现定距前进."""
-        import time as _time
+        """用 set_velocity + 里程计闭环实现定距前进."""
+        import math as _math
 
-        duration = distance_m / speed_mps
-        self.log(f"  使用 set_velocity 前进 {duration:.1f}s")
+        start_state = self.mobility.get_state()
+        start_x, start_y = start_state.pose.x_m, start_state.pose.y_m
+        self.log(f"  使用 set_velocity 前进 {distance_m:.1f}m (speed={speed_mps:.1f}m/s)")
         self.mobility.set_velocity(VelocityCommand(linear_x_mps=speed_mps))
-        self.sleep(duration)
+
+        timeout_s = distance_m / speed_mps * 2.0 + 3.0
+        t0 = self._time_monotonic()
+        while self._time_monotonic() - t0 < timeout_s:
+            self.sleep(0.05)
+            state = self.mobility.get_state()
+            traveled = _math.hypot(state.pose.x_m - start_x, state.pose.y_m - start_y)
+            if traveled >= distance_m:
+                break
+
         self.mobility.stop()
-        self.sleep(1.0)
-        return ActionResult(True, f"前进 {distance_m}m 完成(时间估算)")
+        self.sleep(0.5)
+        final_state = self.mobility.get_state()
+        actual_dist = _math.hypot(final_state.pose.x_m - start_x, final_state.pose.y_m - start_y)
+        self.log(f"  实际前进: {actual_dist:.2f}m (目标: {distance_m:.1f}m)")
+        return ActionResult(True, f"前进 {actual_dist:.2f}m 完成")
+
+    @staticmethod
+    def _time_monotonic() -> float:
+        import time as _time
+        return _time.monotonic()
 
     def _release_camera_view(self) -> None:
         """若摄像头驱动支持, 关闭实时 OpenCV 预览窗口."""
@@ -206,6 +235,8 @@ class DemoOrchestrator:
         state = WorkflowState.SEARCH
         observation: TargetObservation | None = None
         target: Vector3 | None = None
+        self._ensure_ui_task_dispatched()
+        self._sync_ui_status("go_to_B", "移动闭环开始，搜索目标...")
         try:
             for step in range(1, self.settings.max_steps + 1):
                 self.log(f"[{step:02d}] {state.value}")
@@ -280,10 +311,13 @@ class DemoOrchestrator:
 
                 elif state == WorkflowState.PICK_AND_PLACE:
                     assert observation is not None and target is not None
+                    self._sync_ui_status("arrived_B_confirmed", "目标已定位，开始抓取")
                     result = self._pick_and_place(observation, target)
                     if not result.success:
+                        self._sync_ui_status("failed", result.message)
                         return result
                     self.log(f"[{step:02d}] {WorkflowState.DONE.value}")
+                    self._sync_ui_status("done", "移动闭环任务完成")
                     return result
         finally:
             self.mobility.stop()
@@ -306,6 +340,41 @@ class DemoOrchestrator:
         statuses = self.healthcheck()
         failures = [f"{name}: {statuses[name].message}" for name in names if not statuses[name].ready]
         return "; ".join(failures) if failures else None
+
+    def _sync_ui_status(self, status: str, message: str | None = None) -> None:
+        """POST /api/task/status 同步任务状态到 UI 服务器."""
+        try:
+            import json
+            import urllib.request
+            payload = json.dumps({"status": status, "message": message or ""}).encode("utf-8")
+            req = urllib.request.Request(
+                f"{self._ui_base_url}/api/task/status",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=1.0)
+        except Exception:
+            pass
+
+    def _ensure_ui_task_dispatched(self) -> None:
+        """首次调用时向 UI 派发任务."""
+        if self._ui_task_dispatched:
+            return
+        self._ui_task_dispatched = True
+        try:
+            import json
+            import urllib.request
+            payload = json.dumps({"scene": "仿真异物清理"}).encode("utf-8")
+            req = urllib.request.Request(
+                f"{self._ui_base_url}/api/task/dispatch",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=1.0)
+        except Exception:
+            pass
 
     def _target_in_arm_base(self, observation: TargetObservation) -> Vector3:
         """camera_link 观测 -> 外参变换 -> 类别抓取偏置 -> arm_base 抓取点."""
@@ -355,6 +424,7 @@ class DemoOrchestrator:
             f"pick target id={observation.target_id} "
             f"class={observation.class_name} arm_base={target.as_list()}"
         )
+        self._sync_ui_status("arm_start", f"机械臂开始抓取 {observation.class_name}")
         request = PickRequest(
             target_arm_base_m=target,
             basket_arm_base_m=self.settings.basket_arm_base_m,
