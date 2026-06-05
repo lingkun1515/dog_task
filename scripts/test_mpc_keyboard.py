@@ -204,16 +204,14 @@ def main():
 
     # ── 状态变量 ──
     cmd_vel = np.zeros(3)
-    sim_time = 0.0
     sub = int(round(ctrl_dt / model.opt.timestep))
-    last_mpc = 0.0
+    last_mpc = data.time - ctrl_dt      # 确保首帧立即进入 MPC 步进
     steps = 0
     t_start = time.time()
-    standing = True  # 正在站立/已站立
 
     print("\n[5] 主循环 — 在窗口中按住 WASD 控制 Go2\n")
 
-    while standing and not glfw.window_should_close(window):
+    while not glfw.window_should_close(window):
         glfw.poll_events()
 
         # ── 单次按键 ──
@@ -227,8 +225,7 @@ def main():
                 cmd_vel[:] = 0.0
                 _stand_up(world, MPC_STAND_ANGLES)
                 mpc.reset()
-                sim_time = 0.0
-                standing = True
+                last_mpc = data.time - ctrl_dt
                 print(f"  ↩ 重新站立  wall_t={time.time() - t_start:.1f}s", flush=True)
         _one_shot_keys.clear()
 
@@ -260,7 +257,6 @@ def main():
             world.set_ctrl(GO2_ACTUATORS, torque)
             world.step(sub)
             steps += 1
-            sim_time += ctrl_dt
 
             # 诊断 (每 100 步 ≈ 2s)
             if steps % 100 == 0:
