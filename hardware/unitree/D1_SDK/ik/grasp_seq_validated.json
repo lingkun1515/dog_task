@@ -1,0 +1,11 @@
+[
+  "{\"seq\":4,\"address\":1,\"funcode\":2,\"data\":{\"mode\":1,\"angle0\":-0.11,\"angle1\":55.491,\"angle2\":38.084,\"angle3\":0.0,\"angle4\":-3.575,\"angle5\":0.0,\"angle6\":0.0}}",
+  "{\"seq\":5,\"address\":1,\"funcode\":1,\"data\":{\"id\":6,\"angle\":0.0,\"delay_ms\":0}}",
+  "{\"seq\":6,\"address\":1,\"funcode\":2,\"data\":{\"mode\":1,\"angle0\":-0.11,\"angle1\":73.925,\"angle2\":29.814,\"angle3\":-0.0,\"angle4\":-13.739,\"angle5\":0.0,\"angle6\":0.0}}",
+  "{\"seq\":7,\"address\":1,\"funcode\":1,\"data\":{\"id\":6,\"angle\":35.0,\"delay_ms\":0}}",
+  "{\"seq\":8,\"address\":1,\"funcode\":2,\"data\":{\"mode\":1,\"angle0\":-0.11,\"angle1\":55.491,\"angle2\":38.084,\"angle3\":0.0,\"angle4\":-3.575,\"angle5\":0.0,\"angle6\":0.0}}",
+  "{\"seq\":9,\"address\":1,\"funcode\":2,\"data\":{\"mode\":1,\"angle0\":89.939,\"angle1\":69.778,\"angle2\":-39.558,\"angle3\":0.0,\"angle4\":59.78,\"angle5\":0.0,\"angle6\":0.0}}",
+  "{\"seq\":10,\"address\":1,\"funcode\":2,\"data\":{\"mode\":1,\"angle0\":89.939,\"angle1\":80.689,\"angle2\":-41.39,\"angle3\":-0.0,\"angle4\":50.701,\"angle5\":0.0,\"angle6\":0.0}}",
+  "{\"seq\":11,\"address\":1,\"funcode\":1,\"data\":{\"id\":6,\"angle\":0.0,\"delay_ms\":0}}",
+  "{\"seq\":12,\"address\":1,\"funcode\":2,\"data\":{\"mode\":1,\"angle0\":89.939,\"angle1\":69.778,\"angle2\":-39.558,\"angle3\":-0.0,\"angle4\":59.78,\"angle5\":0.0,\"angle6\":0.0}}"
+]

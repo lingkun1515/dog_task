@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img" aria-labelledby="title desc">
+  <title id="title">B 点目标确认画面</title>
+  <desc id="desc">草坪区域中的待清理目标与现场感知叠加信息</desc>
+  <defs>
+    <linearGradient id="sky" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#264b41"/>
+      <stop offset="1" stop-color="#162e24"/>
+    </linearGradient>
+    <linearGradient id="grass" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#40673d"/>
+      <stop offset="1" stop-color="#1b422e"/>
+    </linearGradient>
+    <radialGradient id="ball" cx=".35" cy=".25" r=".8">
+      <stop offset="0" stop-color="#f2efb5"/>
+      <stop offset=".55" stop-color="#c9cf68"/>
+      <stop offset="1" stop-color="#7e934b"/>
+    </radialGradient>
+    <filter id="blur">
+      <feGaussianBlur stdDeviation="9"/>
+    </filter>
+  </defs>
+  <rect width="960" height="540" fill="url(#sky)"/>
+  <circle cx="830" cy="92" r="120" fill="#9bc074" opacity=".13" filter="url(#blur)"/>
+  <path d="M0 210C150 185 250 227 379 209C540 187 686 153 960 213V540H0Z" fill="url(#grass)"/>
+  <path d="M0 315C192 252 317 325 472 277C628 231 753 277 960 248V540H0Z" fill="#2b5738" opacity=".7"/>
+  <g opacity=".42" stroke="#a1ca73" stroke-width="3">
+    <path d="M41 540l27-155M84 540l-8-133M128 540l39-173M202 540l16-128M248 540l-26-158M324 540l35-175M404 540l-11-165M478 540l34-139M558 540l-25-155M627 540l38-185M718 540l-8-144M805 540l32-170M903 540l-17-151"/>
+  </g>
+  <ellipse cx="521" cy="412" rx="67" ry="20" fill="#0c2118" opacity=".48"/>
+  <circle cx="521" cy="379" r="43" fill="url(#ball)"/>
+  <path d="M493 351c21 9 34 29 37 68M548 349c-19 14-27 36-23 70" fill="none" stroke="#eff1bd" stroke-width="4" opacity=".8"/>
+  <g fill="#d7eadb" font-family="Arial, sans-serif" font-size="16" letter-spacing="2">
+    <text x="28" y="40">D455 RGB-D / B SITE</text>
+    <text x="28" y="68" fill="#8fbd91">TARGET CONFIDENCE 97.8%</text>
+  </g>
+  <g stroke="#96e288" stroke-width="2" fill="none">
+    <path d="M458 321h30M458 321v30M584 321h-30M584 321v30M458 439h30M458 439v-30M584 439h-30M584 439v-30"/>
+  </g>
+  <text x="464" y="306" fill="#a9e594" font-family="Arial, sans-serif" font-size="14" letter-spacing="1.2">OBJECT LOCKED</text>
+  <path d="M722 472h206" stroke="#dce8df" stroke-width="2" opacity=".78"/>
+  <text x="722" y="500" fill="#dce8df" font-family="Arial, sans-serif" font-size="14" letter-spacing="1">SITE EVIDENCE PREVIEW</text>
+</svg>

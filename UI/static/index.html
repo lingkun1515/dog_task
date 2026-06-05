@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0d3325" />
+    <title>Husqvarna Outdoor Task Robot Demo</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark" aria-label="Husqvarna logo placeholder">H</div>
+          <div>
+            <p class="eyebrow">HUSQVARNA CONCEPT EXPERIENCE</p>
+            <h1>Outdoor Task Robot Demo</h1>
+          </div>
+        </div>
+        <div class="topbar-meta">
+          <span class="online-dot"></span>
+          <span>设备在线</span>
+          <span class="divider"></span>
+          <span id="current-time">--:--</span>
+        </div>
+      </header>
+
+      <section class="hero-card panel">
+        <div class="hero-copy">
+          <p class="eyebrow green">OUTDOOR SERVICE AUTOMATION</p>
+          <h2>让户外养护，从被动避障走向主动清障。</h2>
+          <p class="hero-description">
+            派发一次任务，设备将自动前往目标点、确认现场异物、执行机械臂清理并回传作业结果。
+          </p>
+          <div class="hero-actions">
+            <button id="dispatch-button" class="primary-button" type="button">
+              <span class="button-icon">↗</span>
+              <span id="dispatch-label">一键派发清理任务</span>
+            </button>
+            <p id="dispatch-hint" class="dispatch-hint">当前设备待命，可立即执行演示任务</p>
+          </div>
+        </div>
+        <div class="hero-visual" aria-hidden="true">
+          <div class="route-line"></div>
+          <div class="route-point point-a">
+            <span>A</span>
+            <small>待命区</small>
+          </div>
+          <div class="route-point point-b">
+            <span>B</span>
+            <small>作业区</small>
+          </div>
+          <div class="robot-card">
+            <span class="robot-pulse"></span>
+            <span class="robot-symbol">R</span>
+            <small>ROBOT 01</small>
+          </div>
+        </div>
+      </section>
+
+      <section id="rain-banner" class="rain-banner hidden">
+        <div>
+          <strong>雨天模式已开启</strong>
+          <span>当前使用室内演示预案，保持同样的派单、执行和结果回传体验。</span>
+        </div>
+        <span class="rain-icon">☂</span>
+      </section>
+
+      <section class="stats-grid">
+        <article class="stat-card panel">
+          <p>设备状态</p>
+          <strong id="device-status">在线 · 待命</strong>
+          <span><i class="status-dot"></i> Outdoor Task Robot 01</span>
+        </article>
+        <article class="stat-card panel">
+          <p>当前任务</p>
+          <strong id="task-id">尚未派单</strong>
+          <span id="task-scene">草坪异物清理</span>
+        </article>
+        <article class="stat-card panel">
+          <p>任务耗时</p>
+          <strong id="elapsed-time">00:00</strong>
+          <span>实时任务计时</span>
+        </article>
+        <article class="stat-card panel">
+          <p>结果回传</p>
+          <strong id="result-state">等待任务</strong>
+          <span>现场证据自动归档</span>
+        </article>
+      </section>
+
+      <section class="content-grid">
+        <article class="timeline-card panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow green">TASK ORCHESTRATION</p>
+              <h3>任务执行时间线</h3>
+            </div>
+            <span id="task-status-pill" class="pill">设备待命</span>
+          </div>
+          <div id="timeline" class="timeline" aria-live="polite"></div>
+        </article>
+
+        <aside class="side-column">
+          <article class="camera-card panel">
+            <div class="section-heading compact">
+              <div>
+                <p class="eyebrow green">SITE EVIDENCE</p>
+                <h3>B 点目标确认画面</h3>
+              </div>
+              <span id="camera-live-badge" class="camera-live"><i></i> LIVE</span>
+            </div>
+            <div class="camera-frame" id="camera-frame">
+              <img id="evidence-image" src="/static/assets/site-preview.svg" alt="B 点目标确认画面" />
+              <img id="camera-stream" class="camera-stream hidden" src="" alt="RealSense D455 双视图" />
+              <div class="camera-overlay">
+                <span id="camera-status">等待现场确认</span>
+                <span>D455 · RGB-D</span>
+              </div>
+              <div id="focus-box" class="focus-box"><span>目标区域</span></div>
+            </div>
+          </article>
+
+          <article class="assurance-card panel">
+            <div class="section-heading compact">
+              <div>
+                <p class="eyebrow green">OPERATION ASSURANCE</p>
+                <h3>运营保障</h3>
+              </div>
+            </div>
+            <div class="assurance-actions">
+              <button id="pause-button" class="secondary-button" type="button">暂停任务</button>
+              <button id="takeover-button" class="secondary-button" type="button">人工接管</button>
+              <button id="rain-button" class="secondary-button" type="button">开启雨天模式</button>
+            </div>
+          </article>
+        </aside>
+      </section>
+
+      <section class="scenario-card panel">
+        <div>
+          <p class="eyebrow green">EXTENSIBLE SCENARIOS</p>
+          <h3>面向未来的户外任务平台</h3>
+        </div>
+        <div class="scenario-list">
+          <span class="scenario active">草坪异物清理</span>
+          <span class="scenario">高尔夫球回收</span>
+          <span class="scenario">雨后场地巡检</span>
+          <span class="scenario">养护物料投放</span>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast hidden" role="status"></div>
+
+    <div id="result-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="result-title">
+      <div class="modal-backdrop"></div>
+      <article class="result-card panel">
+        <button id="close-result" class="modal-close" type="button" aria-label="关闭">×</button>
+        <div class="result-header">
+          <div class="success-mark">✓</div>
+          <div>
+            <p class="eyebrow green">TASK RESULT RECEIVED</p>
+            <h3 id="result-title">清理任务已完成</h3>
+            <p>作业结果与现场证据已同步回传。</p>
+          </div>
+        </div>
+        <div class="result-body">
+          <img id="result-image" src="/static/assets/site-preview.svg" alt="作业现场截图" />
+          <dl class="result-details">
+            <div><dt>任务编号</dt><dd id="result-task-id">--</dd></div>
+            <div><dt>处理对象</dt><dd id="result-object">--</dd></div>
+            <div><dt>处理结果</dt><dd id="result-message">--</dd></div>
+            <div><dt>任务耗时</dt><dd id="result-elapsed">--</dd></div>
+            <div><dt>设备状态</dt><dd id="result-device">--</dd></div>
+          </dl>
+        </div>
+        <button id="reset-button" class="primary-button full" type="button">返回待命界面</button>
+      </article>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

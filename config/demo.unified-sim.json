@@ -1,0 +1,67 @@
+{
+  "sim_world": {
+    "go2_xml": "assets/go2_menagerie/go2_standalone.xml",
+    "d1_urdf": "urdf/D1-550 URDF/d1_550_description/urdf/d1_550_description.urdf",
+    "arm_mount_pos": [0.0, 0.0, 0.10],
+    "arm_mount_quat": [1, 0, 0, 0],
+    "camera_pos": [0.30, 0.0, 0.05],
+    "camera_fovy": 58,
+    "camera_resolution": [848, 480],
+    "timestep": 0.002,
+    "environment": {
+      "ground_size": [10, 10],
+      "objects": [
+        {
+          "type": "sphere",
+          "name": "target_bottle",
+          "pos": [0.35, 0.0, 0.04],
+          "size": 0.022,
+          "rgba": [0.95, 0.25, 0.15, 1.0],
+          "mocap": true
+        }
+      ]
+    }
+  },
+  "mobility": {
+    "driver": "go2_mujoco",
+    "control_mode": "kinematic",
+    "stop_velocity_threshold": 0.05
+  },
+  "arm": {
+    "driver": "mujoco_unified",
+    "tcp_offset_m": 0.12,
+    "approach_dir": [0, 0, -1],
+    "approach_height_m": 0.12,
+    "seconds_per_segment": 0.5,
+    "fps": 30
+  },
+  "camera": {
+    "driver": "mujoco_rgbd",
+    "detection_mode": "ground_truth",
+    "render_fps": 15,
+    "width": 848,
+    "height": 480,
+    "push_to_ui": false
+  },
+  "camera_to_arm_base": {
+    "matrix": [
+      [1, 0, 0, 0],
+      [0, 1, 0, 0],
+      [0, 0, 1, 0],
+      [0, 0, 0, 1]
+    ]
+  },
+  "workflow": {
+    "basket_arm_base_m": [0.12, 0.22, 0.12],
+    "sweet_zone": {
+      "x_min_m": -1.0,
+      "x_max_m": 1.0,
+      "y_abs_max_m": 1.0,
+      "z_min_m": -1.0,
+      "z_max_m": 2.0
+    },
+    "approach_height_m": 0.12,
+    "stop_settle_s": 0.3,
+    "grasp_offset_by_class": {}
+  }
+}

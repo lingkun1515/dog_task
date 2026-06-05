@@ -1,0 +1,77 @@
+{
+  "_comment": "walk-and-pick 演示: Go2 前进 0.5m 后目标在正前方 0.3m 处可达",
+  "sim_world": {
+    "go2_xml": "assets/go2_menagerie/go2_standalone.xml",
+    "d1_urdf": "urdf/D1-550 URDF/d1_550_description/urdf/d1_550_description.urdf",
+    "arm_mount_pos": [0.0, 0.0, 0.10],
+    "arm_mount_quat": [1, 0, 0, 0],
+    "camera_pos": [0.30, 0.0, 0.05],
+    "camera_fovy": 58,
+    "camera_xyaxes": "0 -1 0 0.0872 0 0.9962",
+    "camera_resolution": [848, 480],
+    "timestep": 0.002,
+    "environment": {
+      "ground_size": [10, 10],
+      "objects": [
+        {
+          "type": "sphere",
+          "name": "bottle_target",
+          "pos": [0.85, 0.0, 0.04],
+          "size": 0.025,
+          "rgba": [0.2, 0.8, 0.1, 1.0],
+          "mocap": true
+        },
+        {
+          "type": "box",
+          "name": "basket_vis",
+          "pos": [0.62, 0.22, 0.04],
+          "size": [0.08, 0.06, 0.04],
+          "rgba": [0.3, 0.3, 0.8, 0.5],
+          "mocap": false
+        }
+      ]
+    }
+  },
+  "mobility": {
+    "driver": "go2_mujoco",
+    "control_mode": "kinematic",
+    "stop_velocity_threshold": 0.05
+  },
+  "arm": {
+    "driver": "mujoco_unified",
+    "tcp_offset_m": 0.12,
+    "approach_dir": [0, 0, -1],
+    "approach_height_m": 0.08,
+    "seconds_per_segment": 0.5,
+    "fps": 30
+  },
+  "camera": {
+    "driver": "mujoco_rgbd",
+    "detection_mode": "ground_truth",
+    "render_fps": 15,
+    "width": 848,
+    "height": 480,
+    "push_to_ui": true
+  },
+  "camera_to_arm_base": {
+    "matrix": [
+      [1, 0, 0, 0],
+      [0, 1, 0, 0],
+      [0, 0, 1, 0],
+      [0, 0, 0, 1]
+    ]
+  },
+  "workflow": {
+    "basket_arm_base_m": [0.12, 0.22, 0.04],
+    "sweet_zone": {
+      "x_min_m": -1.0,
+      "x_max_m": 1.0,
+      "y_abs_max_m": 1.0,
+      "z_min_m": -1.0,
+      "z_max_m": 2.0
+    },
+    "approach_height_m": 0.08,
+    "stop_settle_s": 0.2,
+    "grasp_offset_by_class": {}
+  }
+}

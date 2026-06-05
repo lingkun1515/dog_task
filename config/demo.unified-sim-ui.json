@@ -1,0 +1,77 @@
+{
+  "sim_world": {
+    "go2_xml": "assets/go2_menagerie/go2_standalone.xml",
+    "d1_urdf": "urdf/D1-550 URDF/d1_550_description/urdf/d1_550_description.urdf",
+    "arm_mount_pos": [0.0, 0.0, 0.10],
+    "arm_mount_quat": [1, 0, 0, 0],
+    "camera_pos": [0.30, 0.0, 0.05],
+    "camera_fovy": 58,
+    "camera_xyaxes": "0 -1 0 0.0872 0 0.9962",
+    "camera_resolution": [848, 480],
+    "timestep": 0.002,
+    "viewer": false,
+    "environment": {
+      "ground_size": [8, 8],
+      "objects": [
+        {
+          "type": "sphere",
+          "name": "bottle_1",
+          "pos": [0.55, 0.05, 0.37],
+          "size": 0.022,
+          "rgba": [0.2, 0.7, 0.2, 1.0],
+          "mocap": true
+        },
+        {
+          "type": "box",
+          "name": "basket",
+          "pos": [0.12, 0.22, 0.37],
+          "size": [0.08, 0.06, 0.04],
+          "rgba": [0.3, 0.3, 0.8, 0.6],
+          "mocap": false
+        }
+      ]
+    }
+  },
+  "mobility": {
+    "driver": "go2_mujoco",
+    "control_mode": "kinematic",
+    "stop_velocity_threshold": 0.05
+  },
+  "arm": {
+    "driver": "mujoco_unified",
+    "tcp_offset_m": 0.12,
+    "approach_dir": [0, 0, -1],
+    "approach_height_m": 0.10,
+    "seconds_per_segment": 0.8,
+    "fps": 30
+  },
+  "camera": {
+    "driver": "mujoco_rgbd",
+    "detection_mode": "ground_truth",
+    "render_fps": 15,
+    "width": 848,
+    "height": 480,
+    "push_to_ui": true
+  },
+  "camera_to_arm_base": {
+    "matrix": [
+      [1, 0, 0, 0],
+      [0, 1, 0, 0],
+      [0, 0, 1, 0],
+      [0, 0, 0, 1]
+    ]
+  },
+  "workflow": {
+    "basket_arm_base_m": [0.12, 0.22, 0.12],
+    "sweet_zone": {
+      "x_min_m": -1.0,
+      "x_max_m": 1.0,
+      "y_abs_max_m": 1.0,
+      "z_min_m": -1.0,
+      "z_max_m": 2.0
+    },
+    "approach_height_m": 0.10,
+    "stop_settle_s": 0.3,
+    "grasp_offset_by_class": {}
+  }
+}

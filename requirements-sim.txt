@@ -1,0 +1,12 @@
+# 统一 MuJoCo 仿真平台额外依赖
+# 基础依赖 (mujoco/numpy/scipy/opencv) 已在主 requirements 中
+# 本文件仅列出仿真模块新增的依赖
+
+# RL 策略推理 (Go2 locomotion, control_mode="rl" 时需要)
+onnxruntime>=1.17.0
+
+# 以下为已有依赖，此处注明版本要求
+# mujoco>=3.1.0
+# numpy>=1.21.0
+# scipy>=1.7.0
+# opencv-python>=4.5.0
