@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """UnifiedMujocoArm 单元测试."""
+import argparse
 import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-os.environ["MUJOCO_GL"] = "egl"
 
 import numpy as np
 from dog_task.modules.sim.scene_builder import SceneBuilder
@@ -93,10 +92,39 @@ def test_gripper_within_limit(world):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--viewer", action="store_true", help="弹出 MuJoCo 3D 可视化窗口")
+    args = parser.parse_args()
+
+    if not args.viewer:
+        os.environ["MUJOCO_GL"] = "egl"
+
     print("=== UnifiedMujocoArm 单元测试 ===")
     w = build_arm_world()
+
+    viewer_handle = None
+    if args.viewer:
+        import time
+        import mujoco.viewer
+        viewer_handle = mujoco.viewer.launch_passive(w.model, w.data)
+        print("  MuJoCo viewer 已打开")
+
+    def sync_v():
+        if viewer_handle and viewer_handle.is_running():
+            viewer_handle.sync()
+
     test_healthcheck(w)
+    sync_v()
     test_safe_home(w)
+    sync_v()
     test_pick_and_place(w)
+    sync_v()
     test_gripper_within_limit(w)
+    sync_v()
     print("=== ALL PASSED ===")
+
+    if viewer_handle and viewer_handle.is_running():
+        print("\n[MuJoCo Viewer] 关闭窗口退出...")
+        while viewer_handle.is_running():
+            sync_v()
+            time.sleep(0.02)

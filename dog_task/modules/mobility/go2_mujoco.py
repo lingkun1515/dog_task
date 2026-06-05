@@ -49,8 +49,31 @@ IL_DEFAULTS = np.array([
     -1.8, -1.8, -1.8, -1.8,
 ], dtype=np.float32)
 
+# Menagerie Go2 home-keyframe 关节角 — 用于 STANDUP/HOLD 阶段的 PD 目标。
+# 大腿角度 (0.9) 与 IL_DEFAULTS (1.1) 不同: MuJoCo 物理下身重力作用下
+# 0.9 rad 才是自然平衡姿态，1.1 rad 会让狗前倾后仰不稳。
+MENAGERIE_HOME = np.array([
+    0.0, 0.0, 0.0, 0.0,
+    0.9, 0.9, 0.9, 0.9,
+    -1.8, -1.8, -1.8, -1.8,
+], dtype=np.float32)
+
 # Menagerie 站立角度 (leg-grouped, kinematic / set_posture 用)
 GO2_DEFAULT_ANGLES = np.array([0, 0.9, -1.8] * 4)
+
+# 关节限位 (type-grouped, 95% of motor range)
+IL_LIMITS = np.array([
+    [-0.837, 0.837], [-0.837, 0.837], [-0.837, 0.837], [-0.837, 0.837],
+    [-3.490, 1.570], [-3.490, 1.570], [-4.530, 1.570], [-4.530, 1.570],
+    [-2.720, -0.837], [-2.720, -0.837], [-2.720, -0.837], [-2.720, -0.837],
+], dtype=np.float32) * 0.95
+
+# 力矩安全限幅 (type-grouped, N·m)
+IL_TORQUE_LIMITS = np.array([
+    25.0, 25.0, 25.0, 25.0,
+    25.0, 25.0, 25.0, 25.0,
+    40.0, 40.0, 40.0, 40.0,
+], dtype=np.float32)
 
 # 关节顺序重映射 (gather 语义: result = data[indices])
 # IL (type-grouped): FL_hip,FR_hip,RL_hip,RR_hip | FL_thigh,FR_thigh,RL_thigh,RR_thigh | FL_calf,FR_calf,RL_calf,RR_calf
@@ -92,7 +115,7 @@ class Go2MujocoMobility:
                     return HealthStatus(ready=False, message="onnxruntime not installed (required for rl mode)")
                 from ...config import project_path
                 import os
-                model_path = str(project_path(self._config.get("rl_model", "assets/rl_models/flat_policy_v5.onnx")))
+                model_path = str(project_path(self._config.get("rl_model", "assets/rl_models/flat_policy_v6.onnx")))
                 if not os.path.exists(model_path):
                     return HealthStatus(ready=False, message=f"RL model not found: {model_path}")
             return HealthStatus(ready=True, message=f"Go2 MuJoCo ({self._control_mode})")
@@ -152,7 +175,7 @@ class Go2MujocoMobility:
             # RL 模式: stand_down 忽略, stand 重置到 IL 默认角度
             if posture == "stand_down":
                 return ActionResult(success=True, message="posture=stand_down (ignored in RL mode)")
-            self._apply_posture_rl(IL_DEFAULTS)
+            self._apply_posture_rl()
             return ActionResult(success=True, message="posture=stand")
 
         # kinematic 模式
@@ -170,15 +193,16 @@ class Go2MujocoMobility:
         self._world.forward()
         return ActionResult(success=True, message=f"posture={posture}")
 
-    def _apply_posture_rl(self, leg_angles_il: np.ndarray) -> None:
-        """RL 模式下设置姿态：暂停控制循环，用高增益 PD 收敛到目标角度."""
+    def _apply_posture_rl(self) -> None:
+        """RL 模式下设置姿态：暂停控制循环，用高增益 PD 收敛到 MENAGERIE_HOME."""
         was_running = self._running
         self._running = False
         if self._control_thread is not None:
             self._control_thread.join(timeout=1.0)
             self._control_thread = None
 
-        target_q_mj = leg_angles_il[IL_TO_MJ]
+        # MENAGERIE_HOME 用于站立（大腿 0.9，MuJoCo 自然平衡姿态）
+        target_q_mj = MENAGERIE_HOME[IL_TO_MJ]
         stand_kp, stand_kd = 80.0, 2.0
 
         for _ in range(500):
@@ -304,12 +328,14 @@ class Go2MujocoMobility:
 
         # action 是 type-grouped (IL), 计算目标角度后重排为 leg-grouped
         target_q_il = IL_DEFAULTS + ACTION_SCALE * action
+        target_q_il = np.clip(target_q_il, IL_LIMITS[:, 0], IL_LIMITS[:, 1])
         target_q_mj = target_q_il[IL_TO_MJ]
 
         current_q = self._world.get_qpos(GO2_LEG_JOINTS)
         current_dq = self._world.get_qvel(GO2_LEG_JOINTS)
 
         tau = self._kp * (target_q_mj - current_q) - self._kd * current_dq
+        tau = np.clip(tau, -IL_TORQUE_LIMITS[IL_TO_MJ], IL_TORQUE_LIMITS[IL_TO_MJ])
         self._world.set_ctrl(GO2_ACTUATORS, tau)
 
         substeps = int(round(1.0 / (self._control_hz * self._world.model.opt.timestep)))
@@ -351,7 +377,7 @@ class Go2MujocoMobility:
         try:
             from ..sim.rl_policy import RLPolicy
             from ...config import project_path
-            model_path = str(project_path(self._config.get("rl_model", "assets/rl_models/flat_policy_v5.onnx")))
+            model_path = str(project_path(self._config.get("rl_model", "assets/rl_models/flat_policy_v6.onnx")))
             self._rl_policy = RLPolicy(model_path, obs_dim=45)
         except Exception as e:
             logger.error("RL policy load failed, falling back to kinematic: %s", e)

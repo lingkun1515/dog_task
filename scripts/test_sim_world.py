@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """SimWorld + SceneBuilder 单元测试."""
+import argparse
 import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-os.environ["MUJOCO_GL"] = "egl"
-
+import numpy as np
 from dog_task.modules.sim.scene_builder import SceneBuilder
 from dog_task.modules.sim.world import SimWorld
-import numpy as np
 
 
 def test_build_minimal():
@@ -113,6 +112,13 @@ def test_freejoint_qvel_update():
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--viewer", action="store_true", help="弹出 MuJoCo 3D 可视化窗口")
+    args = parser.parse_args()
+
+    if not args.viewer:
+        os.environ["MUJOCO_GL"] = "egl"
+
     print("=== SimWorld + SceneBuilder 单元测试 ===")
     model, data = test_build_minimal()
     test_reset_keyframe(model, data)
@@ -120,3 +126,12 @@ if __name__ == "__main__":
     test_read_lock(model, data)
     test_freejoint_qvel_update()
     print("=== ALL PASSED ===")
+
+    if args.viewer:
+        import time
+        import mujoco.viewer
+        print("\n[MuJoCo Viewer] 关闭窗口退出...")
+        viewer = mujoco.viewer.launch_passive(model, data)
+        while viewer.is_running():
+            viewer.sync()
+            time.sleep(0.02)

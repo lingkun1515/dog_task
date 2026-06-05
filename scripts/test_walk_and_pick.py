@@ -7,6 +7,7 @@
   python3 scripts/test_walk_and_pick.py --viewer     # 弹 MuJoCo 交互窗口
 """
 import argparse
+import math
 import os
 import sys
 import time
@@ -57,7 +58,7 @@ def build_world(viewer=False):
     return world
 
 
-def run(viewer=False):
+def run(viewer=False, rl_mode=False):
     if not viewer:
         os.environ["MUJOCO_GL"] = "egl"
 
@@ -65,7 +66,8 @@ def run(viewer=False):
     world = build_world(viewer)
     print(f"  nq={world.model.nq}, nbody={world.model.nbody}", flush=True)
 
-    mob = Go2MujocoMobility({"control_mode": "kinematic"}, world)
+    control_mode = "rl" if rl_mode else "kinematic"
+    mob = Go2MujocoMobility({"control_mode": control_mode, "control_hz": 50}, world)
     cam = MujocoCameraSim(
         {"detection_mode": "ground_truth", "render_fps": 10, "width": 848, "height": 480},
         world,
@@ -97,26 +99,46 @@ def run(viewer=False):
         print("  未检测到目标", flush=True)
 
     # --- Phase 2: 前进 ---
-    walk_dist = 0.6  # 走 0.6m，目标在 1.0m，走完后目标在前方约 0.4m
-    speed = 0.3
-    duration = walk_dist / speed
-    print(f"\n[Phase 2] Go2 前进 {walk_dist}m (speed={speed}m/s, ~{duration:.1f}s)...", flush=True)
-
-    mob.set_velocity(VelocityCommand(linear_x_mps=speed, linear_y_mps=0.0, angular_z_rps=0.0))
-    t0 = time.time()
-    while time.time() - t0 < duration:
-        time.sleep(0.05)
+    if rl_mode:
+        # RL 模式: 里程计闭环，走到目标距离为止
+        walk_dist = 0.35
+        print(f"\n[Phase 2] Go2 前进 {walk_dist}m (RL 运控 + 里程计闭环)...", flush=True)
+        mob.set_posture("stand")
+        time.sleep(0.5)
         sync_viewer()
-    mob.stop()
-    time.sleep(0.2)
-    sync_viewer()
-
-    state = mob.get_state()
-    print(f"  到达位置: x={state.pose.x_m:.3f}m", flush=True)
+        start_state = mob.get_state()
+        start_x, start_y = start_state.pose.x_m, start_state.pose.y_m
+        mob.set_velocity(VelocityCommand(linear_x_mps=0.5, linear_y_mps=0.0, angular_z_rps=0.0))
+        t0 = time.time()
+        dist_traveled = 0.0
+        while dist_traveled < walk_dist and time.time() - t0 < 30:
+            time.sleep(0.05)
+            sync_viewer()
+            state = mob.get_state()
+            dist_traveled = math.hypot(state.pose.x_m - start_x, state.pose.y_m - start_y)
+        mob.stop()
+        time.sleep(0.2)
+        sync_viewer()
+        print(f"  到达: x={state.pose.x_m:.3f}m (位移 {dist_traveled:.3f}m)", flush=True)
+    else:
+        walk_dist = 0.6
+        speed = 0.3
+        duration = walk_dist / speed
+        print(f"\n[Phase 2] Go2 前进 {walk_dist}m (speed={speed}m/s, ~{duration:.1f}s)...", flush=True)
+        mob.set_velocity(VelocityCommand(linear_x_mps=speed, linear_y_mps=0.0, angular_z_rps=0.0))
+        t0 = time.time()
+        while time.time() - t0 < duration:
+            time.sleep(0.05)
+            sync_viewer()
+        mob.stop()
+        time.sleep(0.2)
+        sync_viewer()
+        state = mob.get_state()
+        print(f"  到达位置: x={state.pose.x_m:.3f}m", flush=True)
 
     # --- Phase 3: 趴下 ---
     print("\n[Phase 3] 趴下...", flush=True)
-    mob.set_posture("stand_down")
+    mob.set_posture("stand_down")  # RL 模式自动忽略
     time.sleep(0.3)
     sync_viewer()
 
@@ -162,5 +184,6 @@ def run(viewer=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--viewer", action="store_true", help="弹出 MuJoCo 交互窗口")
+    parser.add_argument("--rl", action="store_true", help="使用 RL 运控模式 + 里程计闭环")
     args = parser.parse_args()
-    run(viewer=args.viewer)
+    run(viewer=args.viewer, rl_mode=args.rl)

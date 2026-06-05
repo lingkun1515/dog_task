@@ -14,6 +14,7 @@
 然后浏览器打开 http://127.0.0.1:8765，点击按钮即可体验。
 """
 import json
+import math
 import os
 import sys
 import threading
@@ -130,32 +131,38 @@ def execute_workflow(world, mob, cam, arm, sync_v):
     from dog_task.core.models import Vector3
 
     # --- 阶段 1: 前往目标点 ---
-    print("  [执行] Go2 前进 0.35m...")
+    print("  [执行] Go2 前进 0.35m (RL 运控 + 里程计闭环)...")
     ui_sync_status("go_to_B", "设备正在前往 B 点目标区域")
-    walk_dist, speed = 0.35, 0.25
-    duration = walk_dist / speed
-    mob.set_velocity(VelocityCommand(linear_x_mps=speed, linear_y_mps=0.0, angular_z_rps=0.0))
+    walk_dist = 0.35
+    start_state = mob.get_state()
+    start_x, start_y = start_state.pose.x_m, start_state.pose.y_m
+    mob.set_velocity(VelocityCommand(linear_x_mps=0.5, linear_y_mps=0.0, angular_z_rps=0.0))
 
     t0 = time.time()
-    while time.time() - t0 < duration:
+    dist_traveled = 0.0
+    while dist_traveled < walk_dist:
         time.sleep(0.05)
         sync_v()
-        # 检查 UI 侧是否暂停或接管
+        state = mob.get_state()
+        dist_traveled = math.hypot(state.pose.x_m - start_x, state.pose.y_m - start_y)
         task = ui_get_task()
         if task.get("status") in ("paused", "manual_takeover"):
             mob.stop()
             print("  [暂停] 任务被 UI 暂停或接管")
             return False
+        if time.time() - t0 > 30:
+            print("  [超时] 行走超过 30 秒")
+            break
     mob.stop()
     time.sleep(0.3)
 
     state = mob.get_state()
-    print(f"  [到达] x={state.pose.x_m:.2f}m")
+    print(f"  [到达] x={state.pose.x_m:.2f}m (实际位移 {dist_traveled:.2f}m)")
 
     # --- 阶段 2: 到点确认 ---
-    print("  [执行] Go2 趴下...")
+    print("  [执行] 到点确认 (RL 模式跳过趴下)...")
     ui_sync_status("arrived_B_confirmed", "已到达 B 点，目标确认完成")
-    mob.set_posture("stand_down")
+    mob.set_posture("stand_down")  # RL 模式忽略，保持站立
     for _ in range(10):
         time.sleep(0.05)
         sync_v()
@@ -216,7 +223,7 @@ def main():
     print(f"OK (nq={world.model.nq}, nbody={world.model.nbody})")
 
     # 3. 初始化模块
-    mob = Go2MujocoMobility({"control_mode": "kinematic"}, world)
+    mob = Go2MujocoMobility({"control_mode": "rl", "control_hz": 50}, world)
     cam = MujocoCameraSim(
         {"detection_mode": "ground_truth", "render_fps": 15,
          "width": 848, "height": 480, "push_to_ui": True},
