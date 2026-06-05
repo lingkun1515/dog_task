@@ -200,6 +200,7 @@ def main():
     print("[2] 初始化 MPC...", end=" ", flush=True)
     control_hz = 50.0
     ctrl_dt = 1.0 / control_hz
+    sub = int(round(ctrl_dt / model.opt.timestep))
     mpc = MpcController(
         control_hz=control_hz, gait_hz=2.0, gait_duty=0.6,
         mpc_horizon=10, z_des=0.27, verbose=False,
@@ -222,7 +223,6 @@ def main():
 
     # ── 状态变量 ──
     cmd_vel = np.zeros(3)
-    sub = int(round(ctrl_dt / model.opt.timestep))
     last_mpc = data.time - ctrl_dt      # 确保首帧立即进入 MPC 步进
     steps = 0
     t_start = time.time()
