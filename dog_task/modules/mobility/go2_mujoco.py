@@ -42,7 +42,21 @@ GO2_ACTUATORS = [
     "RR_hip", "RR_thigh", "RR_calf",
 ]
 
+# Isaac Lab 训练默认角度 (type-grouped: 髋×4, 大腿×4, 小腿×4)
+IL_DEFAULTS = np.array([
+    0.0, 0.0, 0.0, 0.0,
+    1.1, 1.1, 1.1, 1.1,
+    -1.8, -1.8, -1.8, -1.8,
+], dtype=np.float32)
+
+# Menagerie 站立角度 (leg-grouped, kinematic / set_posture 用)
 GO2_DEFAULT_ANGLES = np.array([0, 0.9, -1.8] * 4)
+
+# 关节顺序重映射 (gather 语义: result = data[indices])
+# IL (type-grouped): FL_hip,FR_hip,RL_hip,RR_hip | FL_thigh,FR_thigh,RL_thigh,RR_thigh | FL_calf,FR_calf,RL_calf,RR_calf
+# MJ (leg-grouped):  FL_hip,FL_thigh,FL_calf | FR_hip,FR_thigh,FR_calf | RL_hip,RL_thigh,RL_calf | RR_hip,RR_thigh,RR_calf
+IL_TO_MJ = np.array([0, 4, 8, 1, 5, 9, 2, 6, 10, 3, 7, 11], dtype=int)   # mj = il[IL_TO_MJ]
+MJ_TO_IL = np.array([0, 3, 6, 9, 1, 4, 7, 10, 2, 5, 8, 11], dtype=int)  # il = mj[MJ_TO_IL]
 
 ACTION_SCALE = 0.25
 
@@ -133,6 +147,15 @@ class Go2MujocoMobility:
         if posture not in ("stand", "stand_down"):
             return ActionResult(success=False, message=f"unknown posture: {posture}")
         self._posture = posture
+
+        if self._control_mode == "rl":
+            # RL 模式: stand_down 忽略, stand 重置到 IL 默认角度
+            if posture == "stand_down":
+                return ActionResult(success=True, message="posture=stand_down (ignored in RL mode)")
+            self._apply_posture_rl(IL_DEFAULTS)
+            return ActionResult(success=True, message="posture=stand")
+
+        # kinematic 模式
         if posture == "stand":
             target_z = 0.27
             leg_angles = GO2_DEFAULT_ANGLES
@@ -140,29 +163,36 @@ class Go2MujocoMobility:
             target_z = 0.15
             leg_angles = np.array([0.0, 1.57, -2.5] * 4)
 
-        if self._control_mode == "kinematic":
-            qpos = self._world.get_freejoint_qpos("root")
-            qpos[2] = target_z
-            self._world.set_freejoint_qpos(qpos, "root")
-            self._world.set_qpos(GO2_LEG_JOINTS, leg_angles)
-            self._world.forward()
-        else:
-            self._apply_posture_rl(target_z, leg_angles)
-        return ActionResult(success=True, message=f"posture={posture}")
-
-    def _apply_posture_rl(self, target_z: float, leg_angles: np.ndarray) -> None:
-        """RL 模式下设置姿态：暂停控制循环，直接改关节，RL 物理不再步进."""
-        was_running = self._running
-        self._running = False
-        if self._control_thread is not None:
-            self._control_thread.join(timeout=1.0)
-            self._control_thread = None
         qpos = self._world.get_freejoint_qpos("root")
         qpos[2] = target_z
         self._world.set_freejoint_qpos(qpos, "root")
         self._world.set_qpos(GO2_LEG_JOINTS, leg_angles)
         self._world.forward()
-        if was_running and self._posture != "stand_down":
+        return ActionResult(success=True, message=f"posture={posture}")
+
+    def _apply_posture_rl(self, leg_angles_il: np.ndarray) -> None:
+        """RL 模式下设置姿态：暂停控制循环，用高增益 PD 收敛到目标角度."""
+        was_running = self._running
+        self._running = False
+        if self._control_thread is not None:
+            self._control_thread.join(timeout=1.0)
+            self._control_thread = None
+
+        target_q_mj = leg_angles_il[IL_TO_MJ]
+        stand_kp, stand_kd = 80.0, 2.0
+
+        for _ in range(500):
+            current_q = self._world.get_qpos(GO2_LEG_JOINTS)
+            current_dq = self._world.get_qvel(GO2_LEG_JOINTS)
+            err = np.max(np.abs(target_q_mj - current_q))
+            if err < 0.01:
+                break
+            tau = stand_kp * (target_q_mj - current_q) - stand_kd * current_dq
+            self._world.set_ctrl(GO2_ACTUATORS, tau)
+            self._world.step(10)
+        self._world.forward()
+
+        if was_running:
             self._start_control_loop()
 
     def go_to(self, goal: Pose2D, options: NavOptions = None) -> ActionResult:
@@ -272,42 +302,50 @@ class Go2MujocoMobility:
         action = self._rl_policy.infer(obs)
         self._last_action = action.copy()
 
-        target_q = GO2_DEFAULT_ANGLES + ACTION_SCALE * action
+        # action 是 type-grouped (IL), 计算目标角度后重排为 leg-grouped
+        target_q_il = IL_DEFAULTS + ACTION_SCALE * action
+        target_q_mj = target_q_il[IL_TO_MJ]
+
         current_q = self._world.get_qpos(GO2_LEG_JOINTS)
         current_dq = self._world.get_qvel(GO2_LEG_JOINTS)
 
-        tau = self._kp * (target_q - current_q) - self._kd * current_dq
+        tau = self._kp * (target_q_mj - current_q) - self._kd * current_dq
         self._world.set_ctrl(GO2_ACTUATORS, tau)
 
         substeps = int(round(1.0 / (self._control_hz * self._world.model.opt.timestep)))
         self._world.step(substeps)
 
     def _build_observation(self, cmd: np.ndarray) -> np.ndarray:
-        """构建 45 维观测向量."""
+        """构建 45 维观测向量 (Isaac Lab type-grouped 顺序)."""
         base_angvel = self._world.get_sensor("imu_gyro")
         base_quat = self._world.get_freejoint_qpos("root")[3:7]
         proj_grav = self._projected_gravity(base_quat)
-        joint_pos = self._world.get_qpos(GO2_LEG_JOINTS)
-        joint_vel = self._world.get_qvel(GO2_LEG_JOINTS)
+        joint_pos_mj = self._world.get_qpos(GO2_LEG_JOINTS)
+        joint_vel_mj = self._world.get_qvel(GO2_LEG_JOINTS)
+
+        # leg-grouped → type-grouped (IL order)
+        joint_pos_il = joint_pos_mj[MJ_TO_IL]
+        joint_vel_il = joint_vel_mj[MJ_TO_IL]
 
         obs = np.concatenate([
-            base_angvel,
-            proj_grav,
-            cmd,
-            joint_pos - GO2_DEFAULT_ANGLES,
-            joint_vel,
-            self._last_action,
+            base_angvel,                    # 0-2
+            proj_grav,                      # 3-5
+            cmd,                            # 6-8
+            joint_pos_il - IL_DEFAULTS,     # 9-20
+            joint_vel_il,                   # 21-32
+            self._last_action,              # 33-44
         ])
         return obs
 
     @staticmethod
     def _projected_gravity(quat_wxyz: np.ndarray) -> np.ndarray:
-        """将重力向量投影到 body 坐标系 (MuJoCo quat=[w,x,y,z])."""
+        """将重力方向投影到 body 坐标系 (Isaac Lab 约定: 单位向量)."""
         w, x, y, z = quat_wxyz
+        # R_body2world^T @ [0, 0, -1] = body 坐标系中的重力方向
         gx = 2.0 * (x * z - w * y)
         gy = 2.0 * (y * z + w * x)
         gz = 1.0 - 2.0 * (x * x + y * y)
-        return np.array([gx, gy, gz]) * (-9.81)
+        return np.array([-gx, -gy, -gz])
 
     def _load_rl_policy(self) -> None:
         try:
