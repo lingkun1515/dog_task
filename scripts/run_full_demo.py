@@ -20,9 +20,10 @@ import urllib.request
 import webbrowser
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-os.environ["MUJOCO_GL"] = "egl"
+os.environ["MUJOCO_GL"] = "glfw"
 
 import mujoco
+from mujoco import viewer as mujoco_viewer
 import numpy as np
 
 from dog_task.modules.sim.scene_builder import SceneBuilder
@@ -146,7 +147,7 @@ def main():
 
     # 4. 打开 MuJoCo 3D 可视化窗口
     print("[启动] MuJoCo 3D 可视化窗口...", end=" ", flush=True)
-    viewer = mujoco.viewer.launch_passive(world.model, world.data)
+    viewer = mujoco_viewer.launch_passive(world.model, world.data)
     print("OK (关闭窗口即结束演示)")
 
     def sync_v():
