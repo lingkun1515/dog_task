@@ -85,7 +85,7 @@ def test_read_lock(model, data):
 
 
 def test_freejoint_qvel_update():
-    """验证 kinematic 模式下 qvel 被正确更新 (bug fix #1.1)."""
+    """验证 freejoint qvel 读写一致性."""
     config = {
         "go2_xml": "assets/go2/go2_standalone.xml",
         "d1_urdf": "assets/d1/d1.urdf",
@@ -101,7 +101,7 @@ def test_freejoint_qvel_update():
     world.reset_to_keyframe("home")
     world.forward()
 
-    # 模拟 kinematic 模式下的 qvel 写入
+    # 验证 freejoint qvel 读写一致性
     vx, vy, vyaw = 0.3, 0.1, 0.05
     world.set_freejoint_qvel(np.array([vx, vy, 0.0, 0.0, 0.0, vyaw]), "root")
     qvel = world.get_freejoint_qvel("root")

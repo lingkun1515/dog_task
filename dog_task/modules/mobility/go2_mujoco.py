@@ -1,7 +1,6 @@
 """Go2MujocoMobility: MuJoCo 仿真 Go2 底盘，实现 MobilityController 协议.
 
-支持两种控制模式:
-  - "kinematic": 直接对 base_link freejoint 做速度积分（无腿部物理）
+控制模式:
   - "rl": 用 ONNX RL 策略推理关节力矩驱动（接近真机行为）
 """
 
@@ -58,8 +57,6 @@ MENAGERIE_HOME = np.array([
     -1.8, -1.8, -1.8, -1.8,
 ], dtype=np.float32)
 
-# Menagerie 站立角度 (leg-grouped, kinematic / set_posture 用)
-GO2_DEFAULT_ANGLES = np.array([0, 0.9, -1.8] * 4)
 
 # 关节限位 (type-grouped, 95% of motor range)
 IL_LIMITS = np.array([
@@ -90,7 +87,7 @@ class Go2MujocoMobility:
     def __init__(self, config: Mapping[str, Any], world: SimWorld) -> None:
         self._world = world
         self._config = dict(config)
-        self._control_mode = self._config.get("control_mode", "kinematic")
+        self._control_mode = self._config.get("control_mode", "rl")
         self._stop_velocity_threshold = self._config.get("stop_velocity_threshold", 0.05)
 
         self._cmd_vel = np.zeros(3)  # [vx, vy, vyaw]
@@ -109,16 +106,15 @@ class Go2MujocoMobility:
     def healthcheck(self) -> HealthStatus:
         try:
             self._world.joint_id("FL_hip_joint")
-            if self._control_mode == "rl":
-                import importlib.util
-                if importlib.util.find_spec("onnxruntime") is None:
-                    return HealthStatus(ready=False, message="onnxruntime not installed (required for rl mode)")
-                from ...config import project_path
-                import os
-                model_path = str(project_path(self._config.get("rl_model", "assets/rl_models/flat_policy_v6.onnx")))
-                if not os.path.exists(model_path):
-                    return HealthStatus(ready=False, message=f"RL model not found: {model_path}")
-            return HealthStatus(ready=True, message=f"Go2 MuJoCo ({self._control_mode})")
+            import importlib.util
+            if importlib.util.find_spec("onnxruntime") is None:
+                return HealthStatus(ready=False, message="onnxruntime not installed")
+            from ...config import project_path
+            import os
+            model_path = str(project_path(self._config.get("rl_model", "assets/rl_models/flat_policy_v6.onnx")))
+            if not os.path.exists(model_path):
+                return HealthStatus(ready=False, message=f"RL model not found: {model_path}")
+            return HealthStatus(ready=True, message="Go2 MuJoCo (rl)")
         except Exception as e:
             return HealthStatus(ready=False, message=str(e))
 
@@ -171,27 +167,10 @@ class Go2MujocoMobility:
             return ActionResult(success=False, message=f"unknown posture: {posture}")
         self._posture = posture
 
-        if self._control_mode == "rl":
-            # RL 模式: stand_down 忽略, stand 重置到 IL 默认角度
-            if posture == "stand_down":
-                return ActionResult(success=True, message="posture=stand_down (ignored in RL mode)")
-            self._apply_posture_rl()
-            return ActionResult(success=True, message="posture=stand")
-
-        # kinematic 模式
-        if posture == "stand":
-            target_z = 0.27
-            leg_angles = GO2_DEFAULT_ANGLES
-        else:
-            target_z = 0.15
-            leg_angles = np.array([0.0, 1.57, -2.5] * 4)
-
-        qpos = self._world.get_freejoint_qpos("root")
-        qpos[2] = target_z
-        self._world.set_freejoint_qpos(qpos, "root")
-        self._world.set_qpos(GO2_LEG_JOINTS, leg_angles)
-        self._world.forward()
-        return ActionResult(success=True, message=f"posture={posture}")
+        if posture == "stand_down":
+            return ActionResult(success=True, message="posture=stand_down (ignored in RL mode)")
+        self._apply_posture_rl()
+        return ActionResult(success=True, message="posture=stand")
 
     def _apply_posture_rl(self) -> None:
         """RL 模式下设置姿态：暂停控制循环，用高增益 PD 收敛到 MENAGERIE_HOME."""
@@ -263,8 +242,6 @@ class Go2MujocoMobility:
 
     def emergency_stop(self) -> ActionResult:
         self.stop()
-        if self._control_mode == "rl":
-            self._world.set_ctrl(GO2_ACTUATORS, np.zeros(12))
         return ActionResult(success=True, message="emergency stop")
 
     # ---- 内部控制循环 ----
@@ -283,39 +260,8 @@ class Go2MujocoMobility:
         while self._running:
             with self._lock:
                 cmd = self._cmd_vel.copy()
-            if self._control_mode == "kinematic":
-                self._kinematic_step(cmd, dt)
-            else:
-                self._rl_step(cmd)
+            self._rl_step(cmd)
             time.sleep(dt)
-
-    def _kinematic_step(self, cmd: np.ndarray, dt: float) -> None:
-        """运动学积分: 直接更新 freejoint qpos 和 qvel."""
-        qpos = self._world.get_freejoint_qpos("root")
-        x, y, z = qpos[0], qpos[1], qpos[2]
-        qw, qx, qy, qz_val = qpos[3], qpos[4], qpos[5], qpos[6]
-        yaw = math.atan2(2.0 * (qw * qz_val + qx * qy), 1.0 - 2.0 * (qy * qy + qz_val * qz_val))
-
-        vx_world = cmd[0] * math.cos(yaw) - cmd[1] * math.sin(yaw)
-        vy_world = cmd[0] * math.sin(yaw) + cmd[1] * math.cos(yaw)
-        vyaw = cmd[2]
-
-        new_x = x + vx_world * dt
-        new_y = y + vy_world * dt
-        new_yaw = yaw + vyaw * dt
-
-        cy = math.cos(new_yaw / 2)
-        sy = math.sin(new_yaw / 2)
-        new_qpos = np.array([new_x, new_y, z, cy, 0, 0, sy])
-        self._world.set_freejoint_qpos(new_qpos, "root")
-
-        vx = (new_x - x) / dt if dt > 0 else 0.0
-        vy = (new_y - y) / dt if dt > 0 else 0.0
-        vyaw_actual = (new_yaw - yaw) / dt if dt > 0 else 0.0
-        self._world.set_freejoint_qvel(np.array([vx, vy, 0.0, 0.0, 0.0, vyaw_actual]), "root")
-
-        self._world.set_qpos(GO2_LEG_JOINTS, GO2_DEFAULT_ANGLES)
-        self._world.forward()
 
     def _rl_step(self, cmd: np.ndarray) -> None:
         """RL 策略推理 + PD 力矩控制."""
@@ -374,14 +320,10 @@ class Go2MujocoMobility:
         return np.array([-gx, -gy, -gz])
 
     def _load_rl_policy(self) -> None:
-        try:
-            from ..sim.rl_policy import RLPolicy
-            from ...config import project_path
-            model_path = str(project_path(self._config.get("rl_model", "assets/rl_models/flat_policy_v6.onnx")))
-            self._rl_policy = RLPolicy(model_path, obs_dim=45)
-        except Exception as e:
-            logger.error("RL policy load failed, falling back to kinematic: %s", e)
-            self._control_mode = "kinematic"
+        from ..sim.rl_policy import RLPolicy
+        from ...config import project_path
+        model_path = str(project_path(self._config.get("rl_model", "assets/rl_models/flat_policy_v6.onnx")))
+        self._rl_policy = RLPolicy(model_path, obs_dim=45)
 
     @staticmethod
     def _wrap_angle(a: float) -> float:

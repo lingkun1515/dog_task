@@ -219,7 +219,7 @@ class SimWorld:
         with self._lock:
             mujoco.mj_forward(self.model, self.data)
 
-    # ---- freejoint 直接操作（kinematic 底盘模式用）----
+    # ---- freejoint 直接操作 ----
 
     def get_freejoint_qpos(self, joint_name: str = "root") -> np.ndarray:
         """获取 freejoint 的 7D qpos [x,y,z,qw,qx,qy,qz]."""

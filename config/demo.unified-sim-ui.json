@@ -34,7 +34,7 @@
   },
   "mobility": {
     "driver": "go2_mujoco",
-    "control_mode": "kinematic",
+    "control_mode": "rl",
     "stop_velocity_threshold": 0.05
   },
   "arm": {
