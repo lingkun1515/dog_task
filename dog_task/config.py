@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 
-# 仓库根目录(dog_sim 的上一级), 用于把配置里的相对路径解析为绝对路径.
+# 仓库根目录(dog_task 的上一级), 用于把配置里的相对路径解析为绝对路径.
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 

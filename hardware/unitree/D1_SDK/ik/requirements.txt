@@ -1,4 +1,0 @@
-# D1 逆解工具依赖. 当前已安装到本目录 ./pylibs (通过 pip install --target).
-# 如需重装: python3 -m pip install --target ./pylibs -r requirements.txt
-numpy==1.26.4
-scipy==1.11.4

@@ -1,8 +1,8 @@
 {
   "_comment": "walk-and-pick 演示: Go2 前进 0.5m 后目标在正前方 0.3m 处可达",
   "sim_world": {
-    "go2_xml": "assets/go2_menagerie/go2_standalone.xml",
-    "d1_urdf": "urdf/D1-550 URDF/d1_550_description/urdf/d1_550_description.urdf",
+    "go2_xml": "assets/go2/go2_standalone.xml",
+    "d1_urdf": "assets/d1/d1.urdf",
     "arm_mount_pos": [0.0, 0.0, 0.10],
     "arm_mount_quat": [1, 0, 0, 0],
     "camera_pos": [0.30, 0.0, 0.05],

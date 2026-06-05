@@ -26,7 +26,7 @@ echo "[2/2] 运行统一仿真 (Go2 + D1 + D455 sim)..."
 echo "  配置: config/demo.unified-sim-ui.json"
 echo ""
 
-python3 -m dog_sim --config config/demo.unified-sim-ui.json fixed-once
+python3 -m dog_task --config config/demo.unified-sim-ui.json fixed-once
 EXIT_CODE=$?
 
 echo ""

@@ -8,14 +8,12 @@ from __future__ import annotations
 
 import logging
 import math
-import sys
 import time
-from pathlib import Path
-from typing import Any, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, List, Mapping, Optional, Tuple
 
 import numpy as np
 
-from ...config import PROJECT_ROOT, project_path
+from ...config import project_path
 from ...core.models import (
     ActionResult,
     ArmCapabilities,
@@ -28,10 +26,7 @@ from ..sim.world import SimWorld
 
 logger = logging.getLogger(__name__)
 
-_IK_DIR = PROJECT_ROOT / "hardware" / "unitree" / "D1_SDK" / "ik"
-_DEFAULT_URDF = (
-    PROJECT_ROOT / "urdf" / "D1-550 URDF" / "d1_550_description" / "urdf" / "d1_550_description.urdf"
-)
+_DEFAULT_URDF = "assets/d1/d1.urdf"
 
 _ARM_JOINTS = ["arm_Joint1", "arm_Joint2", "arm_Joint3", "arm_Joint4", "arm_Joint5", "arm_Joint6"]
 _GRIPPER_JOINTS = ["arm_Joint_L", "arm_Joint_R"]
@@ -61,8 +56,10 @@ class UnifiedMujocoArm:
     def healthcheck(self) -> HealthStatus:
         if not self._urdf_path.is_file():
             return HealthStatus(False, f"D1 URDF not found: {self._urdf_path}")
-        if not (_IK_DIR / "d1_kinematics.py").is_file():
-            return HealthStatus(False, f"d1_kinematics.py not found in {_IK_DIR}")
+        try:
+            from .ik.d1_kinematics import D1Chain  # noqa: F401
+        except ImportError as e:
+            return HealthStatus(False, f"d1_kinematics import failed: {e}")
         try:
             self._world.joint_id("arm_Joint1")
         except KeyError:
@@ -171,9 +168,8 @@ class UnifiedMujocoArm:
     def _ensure_chain(self):
         if self._chain is not None:
             return self._chain
-        if str(_IK_DIR) not in sys.path:
-            sys.path.insert(0, str(_IK_DIR))
-        from d1_kinematics import D1Chain
+        from .ik.d1_kinematics import D1Chain
+
         self._chain = D1Chain(str(self._urdf_path), tcp_offset=(self._tcp_offset_m, 0.0, 0.0))
         return self._chain
 

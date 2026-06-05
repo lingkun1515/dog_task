@@ -13,18 +13,18 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from dog_sim.modules.sim.scene_builder import SceneBuilder
-from dog_sim.modules.sim.world import SimWorld
-from dog_sim.modules.mobility.go2_mujoco import Go2MujocoMobility
-from dog_sim.modules.arm.mujoco_unified import UnifiedMujocoArm
-from dog_sim.modules.camera.mujoco_rgbd import MujocoCameraSim
-from dog_sim.core.models import VelocityCommand
+from dog_task.modules.sim.scene_builder import SceneBuilder
+from dog_task.modules.sim.world import SimWorld
+from dog_task.modules.mobility.go2_mujoco import Go2MujocoMobility
+from dog_task.modules.arm.mujoco_unified import UnifiedMujocoArm
+from dog_task.modules.camera.mujoco_rgbd import MujocoCameraSim
+from dog_task.core.models import VelocityCommand
 
 
 def build_world(viewer=False):
     config_world = {
-        "go2_xml": "assets/go2_menagerie/go2_standalone.xml",
-        "d1_urdf": "urdf/D1-550 URDF/d1_550_description/urdf/d1_550_description.urdf",
+        "go2_xml": "assets/go2/go2_standalone.xml",
+        "d1_urdf": "assets/d1/d1.urdf",
         "arm_mount_pos": [0.0, 0.0, 0.10],
         "arm_mount_quat": [1, 0, 0, 0],
         "camera_pos": [0.30, 0.0, 0.05],
@@ -135,7 +135,7 @@ def run(viewer=False):
 
     # --- Phase 5: 抓取 ---
     print("\n[Phase 5] 手臂抓取...", flush=True)
-    from dog_sim.core.models import PickRequest, Vector3
+    from dog_task.core.models import PickRequest, Vector3
     target_arm = obs.position_m  # 简化: camera_to_arm_base = identity
     request = PickRequest(
         target_arm_base_m=target_arm,
