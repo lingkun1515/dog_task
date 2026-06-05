@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""小白一键全流程演示: UI 浏览器界面 + MuJoCo 3D 可视化 + Go2 前进抓取.
+"""交互式全流程演示: UI 浏览器界面 + MuJoCo 3D 可视化 + Go2 前进抓取.
+
+与剧本式演示不同，本脚本模拟真实运行环境：
+  - 仿真进程轮询 UI 服务端的任务状态
+  - 用户在浏览器点击 "一键派发清理任务" 后，仿真才真正执行
+  - 每个阶段只有仿真实际完成后，才 POST 状态更新到 UI
+  - 支持暂停/继续/人工接管/重置 等 UI 按钮交互
 
 用法:
   conda activate mower
   python3 scripts/run_full_demo.py
 
-然后:
-  1. 浏览器打开 http://127.0.0.1:8765
-  2. 点击 "一键派发清理任务" 按钮
-  3. 观看 MuJoCo 3D 窗口中的狗行走 + 机械臂抓取
-  4. UI 界面会实时显示任务进度和仿真相机画面
+然后浏览器打开 http://127.0.0.1:8765，点击按钮即可体验。
 """
 import json
 import os
@@ -17,14 +19,14 @@ import sys
 import threading
 import time
 import urllib.request
-import webbrowser
+import urllib.error
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 os.environ["MUJOCO_GL"] = "egl"
 
-import mujoco
 from mujoco import viewer as mujoco_viewer
 import numpy as np
+import mujoco
 
 from dog_task.modules.sim.scene_builder import SceneBuilder
 from dog_task.modules.sim.world import SimWorld
@@ -35,10 +37,11 @@ from dog_task.core.models import VelocityCommand, PickRequest
 
 UI_PORT = 8765
 UI_BASE = f"http://127.0.0.1:{UI_PORT}"
+POLL_INTERVAL = 0.5  # 轮询 UI 任务状态的间隔
 
 
 def start_ui_server():
-    """在后台线程启动 UI HTTP 服务器."""
+    """在后台线程启动 UI HTTP 服务器 (mock=False, 等待仿真推送状态)."""
     UI_DIR = os.path.join(os.path.dirname(__file__), "..", "UI")
     sys.path.insert(0, UI_DIR)
     import server as ui_server
@@ -48,30 +51,43 @@ def start_ui_server():
     return srv
 
 
-def sync_ui_status(status, message=""):
-    """POST /api/task/status 同步状态到 UI."""
+def ui_get(path: str) -> dict:
+    """GET 请求 UI 服务."""
     try:
-        payload = json.dumps({"status": status, "message": message}).encode()
-        req = urllib.request.Request(
-            f"{UI_BASE}/api/task/status", data=payload,
-            headers={"Content-Type": "application/json"}, method="POST",
-        )
-        urllib.request.urlopen(req, timeout=1.0)
+        req = urllib.request.Request(f"{UI_BASE}{path}")
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
+            return json.loads(resp.read())
     except Exception:
-        pass
+        return {}
 
 
-def dispatch_ui_task():
-    """向 UI 派发任务."""
+def ui_post(path: str, payload: dict) -> dict:
+    """POST 请求 UI 服务."""
     try:
-        payload = json.dumps({"scene": "草坪异物清理"}).encode()
+        data = json.dumps(payload).encode()
         req = urllib.request.Request(
-            f"{UI_BASE}/api/task/dispatch", data=payload,
+            f"{UI_BASE}{path}", data=data,
             headers={"Content-Type": "application/json"}, method="POST",
         )
-        urllib.request.urlopen(req, timeout=1.0)
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
+            return json.loads(resp.read())
     except Exception:
-        pass
+        return {}
+
+
+def ui_sync_status(status: str, message: str = "") -> dict:
+    """推送任务状态到 UI."""
+    return ui_post("/api/task/status", {"status": status, "message": message})
+
+
+def ui_get_task() -> dict:
+    """获取当前任务快照."""
+    return ui_get("/api/task")
+
+
+def ui_reset_task():
+    """重置任务到 idle."""
+    ui_post("/api/task/reset", {})
 
 
 def build_world():
@@ -109,20 +125,87 @@ def build_world():
     return world
 
 
-def print_step(n, total, text):
-    print(f"\n{'='*50}")
-    print(f"  [{n}/{total}] {text}")
-    print(f"{'='*50}", flush=True)
+def execute_workflow(world, mob, cam, arm, sync_v):
+    """执行完整的清理任务流程，每个阶段完成后推送 UI 状态。返回 True 表示成功."""
+    from dog_task.core.models import Vector3
+
+    # --- 阶段 1: 前往目标点 ---
+    print("  [执行] Go2 前进 0.35m...")
+    ui_sync_status("go_to_B", "设备正在前往 B 点目标区域")
+    walk_dist, speed = 0.35, 0.25
+    duration = walk_dist / speed
+    mob.set_velocity(VelocityCommand(linear_x_mps=speed, linear_y_mps=0.0, angular_z_rps=0.0))
+
+    t0 = time.time()
+    while time.time() - t0 < duration:
+        time.sleep(0.05)
+        sync_v()
+        # 检查 UI 侧是否暂停或接管
+        task = ui_get_task()
+        if task.get("status") in ("paused", "manual_takeover"):
+            mob.stop()
+            print("  [暂停] 任务被 UI 暂停或接管")
+            return False
+    mob.stop()
+    time.sleep(0.3)
+
+    state = mob.get_state()
+    print(f"  [到达] x={state.pose.x_m:.2f}m")
+
+    # --- 阶段 2: 到点确认 ---
+    print("  [执行] Go2 趴下...")
+    ui_sync_status("arrived_B_confirmed", "已到达 B 点，目标确认完成")
+    mob.set_posture("stand_down")
+    for _ in range(10):
+        time.sleep(0.05)
+        sync_v()
+
+    # --- 阶段 3: 目标检测 ---
+    print("  [执行] D455 相机检测目标...")
+    ui_sync_status("arm_start", "机械臂正在执行异物清理")
+    time.sleep(0.5)
+    obs = cam.get_target()
+    if not obs:
+        print("  [失败] 未检测到目标")
+        ui_sync_status("failed", "到点确认失败，已进入人工接管")
+        return False
+
+    print(f"  [检测] {obs.class_name} @ "
+          f"x={obs.position_m.x:.2f} y={obs.position_m.y:.2f} z={obs.position_m.z:.2f}m")
+
+    # --- 阶段 4: 机械臂抓取 ---
+    print("  [执行] D1 机械臂抓取放置...")
+    request = PickRequest(
+        target_arm_base_m=obs.position_m,
+        basket_arm_base_m=Vector3(x=0.12, y=0.22, z=0.04),
+        class_name=obs.class_name,
+        approach_height_m=0.08,
+    )
+    result = arm.pick_and_place(request)
+    for _ in range(10):
+        sync_v()
+
+    # --- 阶段 5: 任务完成 ---
+    if result.success:
+        print(f"  [完成] 抓取成功 — {result.message}")
+        ui_sync_status("arm_done", "异物已安全放入回收篮")
+        time.sleep(0.5)
+        ui_sync_status("done", "清理任务已完成，结果已回传")
+    else:
+        print(f"  [失败] {result.message}")
+        ui_sync_status("failed", result.message)
+
+    return True
 
 
 def main():
     print("=" * 50)
-    print("  DogTaskSim 全流程演示")
+    print("  DogTaskSim 交互式全流程演示")
     print("  Go2 + D1 + D455 仿真 + UI + 3D 可视化")
     print("=" * 50)
 
     # 1. 启动 UI
-    print("\n[启动] UI 服务器...", end=" ", flush=True)
+    print("\n[启动] UI 服务器 (mock=off, 等待仿真推送)...", end=" ", flush=True)
     server = start_ui_server()
     time.sleep(0.5)
     print(f"OK → {UI_BASE}")
@@ -133,8 +216,7 @@ def main():
     print(f"OK (nq={world.model.nq}, nbody={world.model.nbody})")
 
     # 3. 初始化模块
-    mob = Go2MujocoMobility({"control_mode": "rl", "control_hz": 50,
-                              "rl_model": "assets/rl_models/flat_policy_v5.onnx"}, world)
+    mob = Go2MujocoMobility({"control_mode": "kinematic"}, world)
     cam = MujocoCameraSim(
         {"detection_mode": "ground_truth", "render_fps": 15,
          "width": 848, "height": 480, "push_to_ui": True},
@@ -146,13 +228,13 @@ def main():
         world,
     )
 
-    # 4. 先启动相机离屏渲染（抢占 EGL 上下文），再开 3D 窗口
+    # 4. 相机渲染器先启动 (占 EGL context), 再开 3D 窗口
     print("[启动] 仿真相机渲染器...", end=" ", flush=True)
-    cam.get_target()  # 启动渲染线程，创建 Renderer
+    cam.get_target()
     time.sleep(0.2)
     print("OK")
 
-    # 5. 打开 MuJoCo 3D 可视化窗口
+    # 5. MuJoCo 3D 可视化
     print("[启动] MuJoCo 3D 可视化窗口...", end=" ", flush=True)
     viewer = mujoco_viewer.launch_passive(world.model, world.data)
     print("OK (关闭窗口即结束演示)")
@@ -161,108 +243,58 @@ def main():
         if viewer.is_running():
             viewer.sync()
 
-    # 6. 向 UI 派发任务
-    dispatch_ui_task()
-
-    TOTAL_STEPS = 7
-    step = 0
-
-    # --- Step 1: 初始状态 ---
-    step += 1
-    print_step(step, TOTAL_STEPS, "初始姿态 — 狗站立，等待命令")
-    sync_ui_status("ack", "设备就绪，等待派发任务")
-    for _ in range(30):
-        time.sleep(0.05)
-        sync_v()
-
-    # --- Step 2: 前进 ---
-    step += 1
-    walk_dist, speed = 0.35, 0.25
-    duration = walk_dist / speed
-    print_step(step, TOTAL_STEPS, f"Go2 前进 {walk_dist}m (速度 {speed}m/s)")
-    sync_ui_status("go_to_B", "设备正在前往 B 点目标区域")
-
-    mob.set_velocity(VelocityCommand(linear_x_mps=speed, linear_y_mps=0.0, angular_z_rps=0.0))
-    t0 = time.time()
-    while time.time() - t0 < duration:
-        time.sleep(0.05)
-        sync_v()
-    mob.stop()
-    time.sleep(0.3)
-    state = mob.get_state()
-    print(f"  当前位置: x={state.pose.x_m:.2f}m", flush=True)
-
-    # --- Step 3: 趴下 ---
-    step += 1
-    print_step(step, TOTAL_STEPS, "Go2 趴下，准备机械臂作业")
-    sync_ui_status("arrived_B_confirmed", "已到达 B 点，目标确认完成")
-    mob.set_posture("stand_down")
-    for _ in range(10):
-        time.sleep(0.05)
-        sync_v()
-
-    # --- Step 4: 相机检测 ---
-    step += 1
-    print_step(step, TOTAL_STEPS, "D455 仿真相机检测目标")
-    time.sleep(0.5)
-    obs = cam.get_target()
-    if obs:
-        print(f"  检测到: {obs.class_name} @ "
-              f"x={obs.position_m.x:.2f} y={obs.position_m.y:.2f} z={obs.position_m.z:.2f}m")
-    else:
-        print("  未检测到目标！")
-        cam.stop()
-        mob._running = False
-        viewer.close()
-        server.shutdown()
-        return
-
-    # --- Step 5: 机械臂抓取 ---
-    step += 1
-    print_step(step, TOTAL_STEPS, "D1 机械臂执行抓取放置")
-    sync_ui_status("arm_start", "机械臂正在执行异物清理")
-
-    from dog_task.core.models import Vector3
-    request = PickRequest(
-        target_arm_base_m=obs.position_m,
-        basket_arm_base_m=Vector3(x=0.12, y=0.22, z=0.04),
-        class_name=obs.class_name,
-        approach_height_m=0.08,
-    )
-    result = arm.pick_and_place(request)
-    for _ in range(10):
-        sync_v()
-
-    # --- Step 6: 完成 ---
-    step += 1
-    print_step(step, TOTAL_STEPS, f"抓取结果: {'成功' if result.success else '失败'} — {result.message}")
-    if result.success:
-        sync_ui_status("arm_done", "异物已安全放入回收篮")
-        time.sleep(1.0)
-        sync_ui_status("done", "清理任务已完成，结果已回传")
-    else:
-        sync_ui_status("failed", result.message)
-
-    # --- Step 7: 保持运行 ---
-    step += 1
-    print_step(step, TOTAL_STEPS, "演示完成！")
+    # 6. 进入交互式事件循环, 轮询 UI 任务状态
     print(f"""
-    ╔══════════════════════════════════════════╗
-    ║  🎯 演示完成！                          ║
-    ║                                        ║
-    ║  UI 界面:  {UI_BASE}           ║
-    ║  3D 窗口:  关闭 MuJoCo 窗口即退出       ║
-    ║                                        ║
-    ║  💡 提示:                              ║
-    ║  - 鼠标拖拽 3D 窗口可旋转视角           ║
-    ║  - 滚轮缩放                            ║
-    ║  - 右键拖拽平移                         ║
-    ╚══════════════════════════════════════════╝
-    """)
+╔══════════════════════════════════════════════╗
+║  🟢 系统就绪，等待用户操作                  ║
+║                                            ║
+║  浏览器打开: {UI_BASE}              ║
+║  点击 "一键派发清理任务" 启动任务           ║
+║  关闭 3D 窗口退出                          ║
+╚══════════════════════════════════════════════╝
+""")
+
+    last_task_id = None
+    ui_sync_status("idle", "设备待命，等待派发任务")
 
     while viewer.is_running():
         sync_v()
-        time.sleep(0.05)
+
+        try:
+            task = ui_get_task()
+        except Exception:
+            time.sleep(POLL_INTERVAL)
+            continue
+
+        status = task.get("status", "idle")
+        task_id = task.get("task_id")
+
+        # 检测到新任务派发
+        if task_id and task_id != last_task_id and status == "ack":
+            last_task_id = task_id
+            print(f"\n{'='*50}")
+            print(f"  [任务派发] {task_id} — {task.get('scene', '')}")
+            print(f"{'='*50}")
+
+            # 重置场景到初始状态
+            world.reset_to_keyframe("home")
+            world.forward()
+            time.sleep(0.2)
+
+            success = execute_workflow(world, mob, cam, arm, sync_v)
+            if success:
+                last_task_id = None  # 允许下次重新派发
+
+        # 检测到手动重置 (UI 点 "返回待命界面")
+        if status == "idle" and last_task_id is not None:
+            last_task_id = None
+            print("\n  [重置] 任务已重置，等待新任务...")
+            world.reset_to_keyframe("home")
+            world.forward()
+            mob.stop()
+            time.sleep(0.5)
+
+        time.sleep(POLL_INTERVAL)
 
     cam.stop()
     mob._running = False

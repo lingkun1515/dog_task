@@ -148,6 +148,53 @@ DogTaskSim/
     └── test_walk_and_pick.py     # 端到端行走抓取测试
 ```
 
+## 配置文件说明
+
+`config/` 目录下有 3 个仿真配置文件，分别对应不同的使用场景：
+
+### 1. `demo.unified-sim.json` — 固定底座单次抓取
+
+最基础的配置，Go2 不动，直接在当前位置执行 D1 机械臂抓取。
+
+- **目标**: 瓶子在 `[0.35, 0, 0.04]`（Go2 正前方 0.35m，地面高度）
+- **适用**: 验证 D1 臂 IK 求解和抓取动作，不涉及行走
+- **用法**: `python3 -m dog_task --config config/demo.unified-sim.json fixed-once`
+
+### 2. `demo.unified-sim-walk.json` — 行走 + 抓取
+
+Go2 先前进 0.5m 到达目标附近，再执行抓取。
+
+- **目标**: 瓶子在 `[0.85, 0, 0.04]`（Go2 前方 0.85m），篮子 `[0.62, 0.22, 0.04]`
+- **适用**: 验证行走 + 抓取完整流程，相机推流到 UI (`push_to_ui: true`)
+- **用法**: `python3 scripts/test_walk_and_pick.py`
+
+### 3. `demo.unified-sim-ui.json` — UI 联调专用
+
+配合 UI 服务器使用，目标放在机械臂可直接够到的高度。
+
+- **目标**: 瓶子在 `[0.55, 0.05, 0.37]`（台面高度），篮子 `[0.12, 0.22, 0.37]`
+- **特殊配置**: `viewer: false`（不弹 3D 窗口）、`push_to_ui: true`（相机帧推送 UI）
+- **适用**: 和 `bash scripts/run_sim_with_ui.sh` 配合，供 UI 浏览器端联调
+- **用法**: `bash scripts/run_sim_with_ui.sh`
+
+### 配置字段速查
+
+| 字段 | 含义 | 示例值 |
+|------|------|--------|
+| `sim_world.go2_xml` | Go2 MJCF 模型路径 | `assets/go2/go2_standalone.xml` |
+| `sim_world.d1_urdf` | D1 URDF 模型路径 | `assets/d1/d1.urdf` |
+| `sim_world.arm_mount_pos` | 臂安装位置 (相对 base_link) | `[0, 0, 0.10]` |
+| `sim_world.camera_pos` | 相机安装位置 | `[0.30, 0, 0.05]` |
+| `sim_world.camera_fovy` | 相机垂直 FOV (度) | `58` |
+| `sim_world.camera_xyaxes` | 相机朝向 (MuJoCo xyaxes) | `"0 -1 0 0.0872 0 0.9962"` |
+| `mobility.control_mode` | 底盘控制模式 | `kinematic` / `rl` |
+| `arm.tcp_offset_m` | TCP 末端偏移 (m) | `0.12` |
+| `arm.approach_height_m` | 预接近高度 (m) | `0.08` |
+| `camera.detection_mode` | 检测模式 | `ground_truth` / `yolo` |
+| `camera.push_to_ui` | 相机帧推送 UI | `true` / `false` |
+| `workflow.basket_arm_base_m` | 回收篮位置 (臂坐标系) | `[0.12, 0.22, 0.04]` |
+| `environment.objects[].mocap` | 是否为 mocap 可移动物体 | `true` / `false` |
+
 ## 运行测试
 
 ```bash
