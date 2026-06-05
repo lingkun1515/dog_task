@@ -20,7 +20,7 @@ import urllib.request
 import webbrowser
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-os.environ["MUJOCO_GL"] = "glfw"
+os.environ["MUJOCO_GL"] = "egl"
 
 import mujoco
 from mujoco import viewer as mujoco_viewer
@@ -82,7 +82,7 @@ def build_world():
         "arm_mount_quat": [1, 0, 0, 0],
         "camera_pos": [0.30, 0.0, 0.05],
         "camera_fovy": 58,
-        "camera_xyaxes": "0 -1 0 0.0872 0 0.9962",
+        "camera_xyaxes": "0 -1 0 0.3907 0 0.9205",
         "camera_resolution": [848, 480],
         "environment": {
             "ground_size": [8, 8],
@@ -133,7 +133,8 @@ def main():
     print(f"OK (nq={world.model.nq}, nbody={world.model.nbody})")
 
     # 3. 初始化模块
-    mob = Go2MujocoMobility({"control_mode": "kinematic"}, world)
+    mob = Go2MujocoMobility({"control_mode": "rl", "control_hz": 50,
+                              "rl_model": "assets/rl_models/flat_policy_v5.onnx"}, world)
     cam = MujocoCameraSim(
         {"detection_mode": "ground_truth", "render_fps": 15,
          "width": 848, "height": 480, "push_to_ui": True},
@@ -145,7 +146,13 @@ def main():
         world,
     )
 
-    # 4. 打开 MuJoCo 3D 可视化窗口
+    # 4. 先启动相机离屏渲染（抢占 EGL 上下文），再开 3D 窗口
+    print("[启动] 仿真相机渲染器...", end=" ", flush=True)
+    cam.get_target()  # 启动渲染线程，创建 Renderer
+    time.sleep(0.2)
+    print("OK")
+
+    # 5. 打开 MuJoCo 3D 可视化窗口
     print("[启动] MuJoCo 3D 可视化窗口...", end=" ", flush=True)
     viewer = mujoco_viewer.launch_passive(world.model, world.data)
     print("OK (关闭窗口即结束演示)")
@@ -154,7 +161,7 @@ def main():
         if viewer.is_running():
             viewer.sync()
 
-    # 5. 向 UI 派发任务
+    # 6. 向 UI 派发任务
     dispatch_ui_task()
 
     TOTAL_STEPS = 7
@@ -170,7 +177,7 @@ def main():
 
     # --- Step 2: 前进 ---
     step += 1
-    walk_dist, speed = 0.6, 0.3
+    walk_dist, speed = 0.35, 0.25
     duration = walk_dist / speed
     print_step(step, TOTAL_STEPS, f"Go2 前进 {walk_dist}m (速度 {speed}m/s)")
     sync_ui_status("go_to_B", "设备正在前往 B 点目标区域")

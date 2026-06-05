@@ -133,18 +133,37 @@ class Go2MujocoMobility:
         if posture not in ("stand", "stand_down"):
             return ActionResult(success=False, message=f"unknown posture: {posture}")
         self._posture = posture
+        if posture == "stand":
+            target_z = 0.27
+            leg_angles = GO2_DEFAULT_ANGLES
+        else:
+            target_z = 0.15
+            leg_angles = np.array([0.0, 1.57, -2.5] * 4)
+
         if self._control_mode == "kinematic":
             qpos = self._world.get_freejoint_qpos("root")
-            if posture == "stand":
-                qpos[2] = 0.27
-                leg_angles = GO2_DEFAULT_ANGLES
-            else:
-                qpos[2] = 0.15
-                leg_angles = np.array([0.0, 1.57, -2.5] * 4)
+            qpos[2] = target_z
             self._world.set_freejoint_qpos(qpos, "root")
             self._world.set_qpos(GO2_LEG_JOINTS, leg_angles)
             self._world.forward()
+        else:
+            self._apply_posture_rl(target_z, leg_angles)
         return ActionResult(success=True, message=f"posture={posture}")
+
+    def _apply_posture_rl(self, target_z: float, leg_angles: np.ndarray) -> None:
+        """RL 模式下设置姿态：暂停控制循环，直接改关节，RL 物理不再步进."""
+        was_running = self._running
+        self._running = False
+        if self._control_thread is not None:
+            self._control_thread.join(timeout=1.0)
+            self._control_thread = None
+        qpos = self._world.get_freejoint_qpos("root")
+        qpos[2] = target_z
+        self._world.set_freejoint_qpos(qpos, "root")
+        self._world.set_qpos(GO2_LEG_JOINTS, leg_angles)
+        self._world.forward()
+        if was_running and self._posture != "stand_down":
+            self._start_control_loop()
 
     def go_to(self, goal: Pose2D, options: NavOptions = None) -> ActionResult:
         state = self.get_state()
