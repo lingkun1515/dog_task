@@ -1,0 +1,107 @@
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+
+try:
+    import tomllib  # Python 3.11+
+except ModuleNotFoundError:
+    import tomli as tomllib
+from pathlib import Path
+
+DEFAULT_ROBOT_PORT = 9002
+DEFAULT_GRASP_PORT = 5000
+DEFAULT_GRASP_PATH = "/grasp"
+DEFAULT_EXECUTION_PORT = 8100
+
+
+@dataclass(frozen=True)
+class RobotConfig:
+    """机器人连接配置，由 config/robots/<编号>.toml 加载。"""
+
+    robot_id: str
+    mode: str = "real"          # "real" | "sim"
+    host: str = ""              # 实机底盘 TCP 地址
+    port: int = DEFAULT_ROBOT_PORT
+    orin: str = ""              # 实机机械臂/抓取服务地址
+    grasp_port: int = DEFAULT_GRASP_PORT
+    grasp_path: str = DEFAULT_GRASP_PATH
+    execution_url: str = ""     # 仿真/执行侧 HTTP 服务地址
+    target_x: float = 5.0       # 目标点 X（仿真导航用）
+    target_y: float = 0.0       # 目标点 Y
+
+    @property
+    def grasp_url(self) -> str:
+        if self.mode == "sim":
+            return f"{self.execution_url}/api/grasp"
+        return f"http://{self.orin}:{self.grasp_port}{self.grasp_path}"
+
+    def video_feed_url(self, *, detect: bool = True) -> str:
+        """MJPEG 视频流。"""
+        if self.mode == "sim":
+            return f"{self.execution_url}/api/video_feed"
+        url = f"http://{self.orin}:{self.grasp_port}/video_feed"
+        return f"{url}?detect=1" if detect else url
+
+    def navigate_url(self) -> str:
+        """导航接口地址。"""
+        if self.mode == "sim":
+            return f"{self.execution_url}/api/navigate"
+        return ""
+
+    def navigate_status_url(self) -> str:
+        """导航状态查询地址。"""
+        if self.mode == "sim":
+            return f"{self.execution_url}/api/navigate/status"
+        return ""
+
+    def grasp_status_url(self) -> str:
+        """抓取状态查询地址。"""
+        if self.mode == "sim":
+            return f"{self.execution_url}/api/grasp/status"
+        return ""
+
+
+def robots_config_dir() -> Path:
+    if config_dir := os.environ.get("SCHEDULER_CONFIG_DIR"):
+        return Path(config_dir)
+    return Path(__file__).resolve().parent.parent / "config" / "robots"
+
+
+def load_robot_config(robot_id: str) -> RobotConfig:
+    """根据机器编号加载 config/robots/<robot_id>.toml。"""
+    config_path = robots_config_dir() / f"{robot_id}.toml"
+    if not config_path.is_file():
+        raise FileNotFoundError(f"未找到机器人配置: {config_path}")
+
+    with config_path.open("rb") as config_file:
+        data = tomllib.load(config_file)
+
+    mode = str(data.get("mode", "real"))
+
+    if mode == "sim":
+        execution_url = data.get("execution_url")
+        if not execution_url:
+            raise ValueError(f"仿真模式下缺少 execution_url 字段: {config_path}")
+        return RobotConfig(
+            robot_id=robot_id,
+            mode="sim",
+            execution_url=str(execution_url),
+            target_x=float(data.get("target_x", 5.0)),
+            target_y=float(data.get("target_y", 0.0)),
+        )
+
+    host = data.get("host")
+    orin = data.get("orin")
+    if not host or not orin:
+        raise ValueError(f"实机模式缺少 host 或 orin 字段: {config_path}")
+
+    return RobotConfig(
+        robot_id=robot_id,
+        mode="real",
+        host=str(host),
+        orin=str(orin),
+        port=int(data.get("port", DEFAULT_ROBOT_PORT)),
+        grasp_port=int(data.get("grasp_port", DEFAULT_GRASP_PORT)),
+        grasp_path=str(data.get("grasp_path", DEFAULT_GRASP_PATH)),
+    )
