@@ -37,9 +37,12 @@ class SimulationCamera:
             self._cam.fixedcamid = cam_id
         else:
             self._cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
-            self._cam.trackbodyid = mujoco.mj_name2id(
-                model, mujoco.mjtObj.mjOBJ_BODY, "base_link"
-            )
+            track_body = -1
+            for name in ("base_link", "base", "trunk"):
+                track_body = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, name)
+                if track_body >= 0:
+                    break
+            self._cam.trackbodyid = max(track_body, 0)
             self._cam.distance = 3.0
             self._cam.elevation = -25
             self._cam.azimuth = 90

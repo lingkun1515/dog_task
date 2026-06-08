@@ -1,0 +1,32 @@
+# DogTask Mujoco simulation config — Go1 + Interbotix wx250s arm
+xml_path: "assets/go1_wx250s/scene.xml"
+
+simulation_dt: 0.005
+control_decimation: 4
+
+# PD gains (all-zero default — model's XML standing pose)
+kps: [35.0, 35.0, 35.0, 35.0, 35.0, 35.0,
+      35.0, 35.0, 35.0, 35.0, 35.0, 35.0,
+      20.0, 20.0, 20.0, 10.0, 10.0, 10.0]
+kds: [0.8, 0.8, 0.8, 0.8, 0.8, 0.8,
+      0.8, 0.8, 0.8, 0.8, 0.8, 0.8,
+      1.0, 1.0, 1.0, 0.5, 0.5, 0.5]
+
+default_angles: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+nav_linear_speed: 0.5
+nav_angular_speed: 0.8
+nav_arrival_threshold: 0.25
+nav_heading_threshold: 0.1
+
+# wx250s arm grasp pose (placeholder — requires tuning)
+grasp_arm_angles: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+grasp_step_duration: 0.02
+grasp_hold_duration: 1.0
+
+camera_width: 640
+camera_height: 480
+window_width: 1200
+window_height: 900
