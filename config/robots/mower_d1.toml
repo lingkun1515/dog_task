@@ -1,0 +1,7 @@
+mode = "real"
+# 底盘: Mower (TCP), 机械臂: D1 (HTTP)
+host = "10.10.170.239"
+orin = "10.10.170.191"
+port = 9002
+grasp_port = 5000
+grasp_path = "/grasp"
