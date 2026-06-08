@@ -33,7 +33,7 @@ class RobotConfig:
     home_y: float = -10.0       # 回程目标 Y
     arrival_threshold: float = 0.5  # 导航到达判定距离（需 ≤ 机械臂作业范围）
 
-    # 机械臂类型（sim: piper/arx5/wx250s, real: d1）
+    # 机械臂类型（sim: piper/d1, real: d1）
     arm_type: str = ""
     # 实机 D1 机械臂网络地址
     arm_host: str = ""
