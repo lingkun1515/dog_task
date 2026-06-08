@@ -1,0 +1,38 @@
+# DogTask Mujoco simulation default config
+
+# Paths (relative to project root)
+xml_path: "assets/go2_piper/scene.xml"
+
+# Simulation parameters
+simulation_dt: 0.005
+control_decimation: 4       # 50 Hz control (0.005 * 4 = 0.02s)
+
+# PD controller gains
+kps: [35.0, 35.0, 35.0, 35.0, 35.0, 35.0,
+      35.0, 35.0, 35.0, 35.0, 35.0, 35.0,
+      40.0, 40.0, 40.0, 20.0, 20.0, 20.0]
+
+kds: [0.8, 0.8, 0.8, 0.8, 0.8, 0.8,
+      0.8, 0.8, 0.8, 0.8, 0.8, 0.8,
+      1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+
+# Default joint angles (standing pose)
+# Order: FR_hip/thigh/calf, FL_hip/thigh/calf, RR_hip/thigh/calf, RL_hip/thigh/calf, arm_j1..j6
+default_angles: [0.1, 0.8, -1.5, -0.1, 0.8, -1.5,
+                 0.1, 1.0, -1.5, -0.1, 1.0, -1.5,
+                 0.0, 0.0, -0.0, 0.0, -0.0, 0.0]
+
+# Navigation parameters
+nav_linear_speed: 0.5        # m/s (base sliding speed)
+nav_angular_speed: 0.8       # rad/s
+nav_arrival_threshold: 0.5   # meters from target to consider "arrived"
+nav_heading_threshold: 0.1   # radians (~5.7°) for heading alignment
+
+# Arm grasp pose (joint angles for Piper arm joints 1-6)
+grasp_arm_angles: [0.3, 1.5, -2.2, 0.5, -1.0, 0.0]
+grasp_step_duration: 0.02    # seconds per interpolation step
+grasp_hold_duration: 1.0     # seconds to hold grasp pose
+
+# Camera
+camera_width: 640
+camera_height: 480
