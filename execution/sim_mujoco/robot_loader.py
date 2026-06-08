@@ -55,14 +55,25 @@ def get_base_yaw(data: mujoco.MjData) -> float:
     return np.arctan2(siny_cosp, cosy_cosp)
 
 
-def set_base_velocity(data: mujoco.MjData, vx: float, vy: float, vyaw: float) -> None:
-    """Set base velocity directly (simplified sliding mode)."""
-    data.qvel[0] = vx
-    data.qvel[1] = vy
-    data.qvel[2] = 0.0
-    data.qvel[3] = 0.0
-    data.qvel[4] = 0.0
-    data.qvel[5] = vyaw
+def move_base(data: mujoco.MjData, dx: float, dy: float, dyaw: float, dt: float) -> None:
+    """Directly translate/rotate base in world frame (kinematic sliding mode).
+
+    Modifies ``data.qpos`` for the base freejoint so the robot glides
+    without needing leg locomotion.  PD control keeps legs in stance.
+    """
+    # --- translation ---
+    data.qpos[0] += dx * dt
+    data.qpos[1] += dy * dt
+
+    # --- yaw rotation (quaternion * rot_z(dyaw*dt)) ---
+    half = dyaw * dt * 0.5
+    c = np.cos(half)
+    s = np.sin(half)
+    qw, qx, qy, qz = data.qpos[3:7]
+    data.qpos[3] = c * qw - s * qz
+    data.qpos[4] = c * qx - s * qy
+    data.qpos[5] = c * qy + s * qx
+    data.qpos[6] = c * qz + s * qw
 
 
 class RobotSim:

@@ -11,7 +11,7 @@ import numpy as np
 from execution.sim_mujoco.camera import SimulationCamera
 from execution.sim_mujoco.grasp import GraspController, GraspState
 from execution.sim_mujoco.navigation import NavState, NavigationController
-from execution.sim_mujoco.robot_loader import RobotSim, set_base_velocity
+from execution.sim_mujoco.robot_loader import RobotSim, move_base
 
 
 class SimulationScene:
@@ -103,22 +103,39 @@ class SimulationScene:
     # ------------------------------------------------------------------
     def _loop(self) -> None:
         decimation = self.robot.control_decimation
+        physics_dt = self.robot.model.opt.timestep
+        ctrl_dt = physics_dt * decimation
         step_counter = 0
         render_mod = max(decimation * 3, 4)
 
+        next_wake = time.perf_counter()
+
         while self._running:
+            # --- rate-limit to real-time ---
+            now = time.perf_counter()
+            if now < next_wake:
+                time.sleep(min(next_wake - now, physics_dt * 0.8))
+                continue
+
             if step_counter % decimation == 0:
-                # -- navigation --
+                # -- navigation (kinematic sliding) --
                 nav_cmd = self.nav.update(
                     self.robot.base_position,
                     self.robot.base_yaw,
-                    self.robot.model.opt.timestep * decimation,
+                    ctrl_dt,
                 )
-                set_base_velocity(
+                # Transform robot-frame velocity → world-frame displacement
+                yaw = self.robot.base_yaw
+                c = np.cos(yaw)
+                s = np.sin(yaw)
+                world_dx = float(nav_cmd[0] * c - nav_cmd[1] * s)
+                world_dy = float(nav_cmd[0] * s + nav_cmd[1] * c)
+                move_base(
                     self.robot.data,
-                    float(nav_cmd[0]),
-                    float(nav_cmd[1]),
+                    world_dx,
+                    world_dy,
                     float(nav_cmd[2]),
+                    ctrl_dt,
                 )
 
                 # -- grasp --
@@ -135,7 +152,12 @@ class SimulationScene:
 
             self.robot.step()
             step_counter += 1
-            time.sleep(0.0001)
+
+            # schedule next physics step
+            next_wake += physics_dt
+            # reset clock if running behind by more than one step
+            if next_wake < time.perf_counter() - physics_dt:
+                next_wake = time.perf_counter() + physics_dt
 
     # ------------------------------------------------------------------
     # Command helpers (called from server endpoints)

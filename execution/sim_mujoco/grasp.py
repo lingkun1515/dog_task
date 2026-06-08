@@ -45,9 +45,9 @@ class GraspController:
         return self._current_target.copy()
 
     def start(self) -> None:
-        """Begin grasp sequence."""
-        if self._state != GraspState.IDLE:
-            return
+        """Begin grasp sequence (restartable from any terminal state)."""
+        if self._state in (GraspState.MOVING_TO_GRASP, GraspState.HOLDING):
+            return  # already in progress
         self._state = GraspState.MOVING_TO_GRASP
         self._start_time = time.monotonic()
         self._current_target = self.grasp_angles.copy()
@@ -65,7 +65,7 @@ class GraspController:
 
         if self._state == GraspState.MOVING_TO_GRASP:
             error = np.max(np.abs(current_arm - self.grasp_angles))
-            if error < 0.05:
+            if error < 0.12:
                 self._state = GraspState.HOLDING
                 self._start_time = now
 
@@ -77,7 +77,7 @@ class GraspController:
 
         elif self._state == GraspState.RETURNING:
             error = np.max(np.abs(current_arm - self.default_arm))
-            if error < 0.05:
+            if error < 0.12:
                 self._state = GraspState.SUCCESS
 
         return self._state

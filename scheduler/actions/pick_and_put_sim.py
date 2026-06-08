@@ -18,7 +18,7 @@ def _call_grasp(grasp_url: str) -> bool:
     try:
         with urllib.request.urlopen(request, timeout=10) as response:
             data = json.loads(response.read().decode("utf-8"))
-            return data.get("accepted", False)
+            return data.get("status") == "accepted"
     except urllib.error.URLError as exc:
         logger.error("抓取请求失败: %s", exc.reason)
         return False
