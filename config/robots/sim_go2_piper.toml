@@ -1,6 +1,13 @@
 mode = "sim"
 execution_url = "http://localhost:8100"
+# 启动仿真时设置: SIM_CONFIG=execution/sim_mujoco/config.yaml
 target_x = 12.0
 target_y = 0.0
 home_x = 0.0
 home_y = -10.0
+
+arm_type = "piper"
+tcp_body = "end_effector"
+arm_base_body = "Piper"
+target_bodies = "target_sphere"
+target_labels = "ball"

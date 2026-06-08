@@ -100,6 +100,7 @@ class RobotSim:
 
         self._step_counter = 0
         self._target_dof_pos = self.default_angles.copy()
+        self._algo_arm_target: np.ndarray | None = None  # set by algo grasp thread
 
     def reset(self) -> None:
         """Reset simulation to initial state."""
@@ -107,6 +108,7 @@ class RobotSim:
         mujoco.mj_forward(self.model, self.data)
         self._step_counter = 0
         self._target_dof_pos = self.default_angles.copy()
+        self._algo_arm_target = None
 
     def step(self) -> None:
         """Run one physics step with PD control."""
@@ -134,6 +136,23 @@ class RobotSim:
         arm_start = self._qpos_start + 12  # 7 + 12 = 19
         arm_end = arm_start + 6
         return self.data.qpos[arm_start:arm_end].copy()
+
+    def get_body_position(self, body_name: str) -> np.ndarray:
+        """Get a body's (x, y, z) position in world frame."""
+        body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, body_name)
+        if body_id < 0:
+            raise ValueError(f"Body '{body_name}' not found in model")
+        return self.data.xpos[body_id].copy()
+
+    def get_body_pose(self, body_name: str) -> tuple[np.ndarray, np.ndarray]:
+        """Get a body's (xpos, xmat) in world frame. xmat is 3x3."""
+        body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, body_name)
+        if body_id < 0:
+            raise ValueError(f"Body '{body_name}' not found in model")
+        return (
+            self.data.xpos[body_id].copy(),
+            self.data.xmat[body_id].copy().reshape(3, 3),
+        )
 
     @property
     def base_position(self) -> np.ndarray:

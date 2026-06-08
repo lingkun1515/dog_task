@@ -32,6 +32,21 @@ class RobotConfig:
     home_x: float = 0.0         # 回程目标 X（充电桩/原点）
     home_y: float = -10.0       # 回程目标 Y
 
+    # 机械臂类型（sim: piper/arx5/wx250s, real: d1）
+    arm_type: str = ""
+    # 实机 D1 机械臂网络地址
+    arm_host: str = ""
+    arm_port: int = 8088
+    # 实机标定文件路径
+    calibration_path: str = ""
+    # 仿真 MJCF body 名称
+    tcp_body: str = ""
+    arm_base_body: str = ""
+    # 目标物体
+    target_bodies: str = ""   # 逗号分隔
+    target_labels: str = ""   # 逗号分隔
+    target_classes: str = ""  # YOLO 检测类别（逗号分隔）
+
     @property
     def grasp_url(self) -> str:
         if self.mode == "sim":
@@ -81,6 +96,16 @@ def load_robot_config(robot_id: str) -> RobotConfig:
 
     mode = str(data.get("mode", "real"))
 
+    arm_type = str(data.get("arm_type", ""))
+    arm_host = str(data.get("arm_host", ""))
+    arm_port = int(data.get("arm_port", 8088))
+    calibration_path = str(data.get("calibration_path", ""))
+    tcp_body = str(data.get("tcp_body", ""))
+    arm_base_body = str(data.get("arm_base_body", ""))
+    target_bodies = str(data.get("target_bodies", ""))
+    target_labels = str(data.get("target_labels", ""))
+    target_classes = str(data.get("target_classes", ""))
+
     if mode == "sim":
         execution_url = data.get("execution_url")
         if not execution_url:
@@ -93,6 +118,11 @@ def load_robot_config(robot_id: str) -> RobotConfig:
             target_y=float(data.get("target_y", 0.0)),
             home_x=float(data.get("home_x", 0.0)),
             home_y=float(data.get("home_y", -10.0)),
+            arm_type=arm_type,
+            tcp_body=tcp_body,
+            arm_base_body=arm_base_body,
+            target_bodies=target_bodies,
+            target_labels=target_labels,
         )
 
     host = data.get("host")
@@ -108,4 +138,9 @@ def load_robot_config(robot_id: str) -> RobotConfig:
         port=int(data.get("port", DEFAULT_ROBOT_PORT)),
         grasp_port=int(data.get("grasp_port", DEFAULT_GRASP_PORT)),
         grasp_path=str(data.get("grasp_path", DEFAULT_GRASP_PATH)),
+        arm_type=arm_type,
+        arm_host=arm_host,
+        arm_port=arm_port,
+        calibration_path=calibration_path,
+        target_classes=target_classes,
     )

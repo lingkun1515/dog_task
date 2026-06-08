@@ -5,3 +5,9 @@ target_x = 12.0
 target_y = 0.0
 home_x = 0.0
 home_y = -10.0
+
+arm_type = "arx5"
+tcp_body = "x5_link6"
+arm_base_body = "x5_base_link"
+target_bodies = "target_sphere"
+target_labels = "ball"

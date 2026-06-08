@@ -26,6 +26,16 @@ grasp_arm_angles: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 grasp_step_duration: 0.02
 grasp_hold_duration: 1.0
 
+algorithms:
+  tcp_body: "x5_link6"
+  arm_base_body: "x5_base_link"
+  target_bodies: ["target_sphere"]
+  target_labels: ["ball"]
+  approach_height: 0.12
+  gripper_open: 65
+  gripper_close: 0
+  safe_park_angles: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
 camera_width: 640
 camera_height: 480
 window_width: 1200

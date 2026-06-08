@@ -48,6 +48,16 @@ grasp_hold_duration: 1.0     # seconds to hold grasp pose
 camera_width: 640
 camera_height: 480
 
-# Desktop visualisation window (used with --render flag)
+# Algorithm-based grasp (New! Replaces hardcoded grasp_arm_angles when present)
+algorithms:
+  tcp_body: "end_effector"
+  arm_base_body: "Piper"
+  target_bodies: ["target_sphere"]
+  target_labels: ["ball"]
+  approach_height: 0.12
+  gripper_open: 65
+  gripper_close: 0
+  safe_park_angles: [0.0, 1.0, -0.8, 0.0, -0.3, 0.0]
+
 window_width: 1200
 window_height: 900

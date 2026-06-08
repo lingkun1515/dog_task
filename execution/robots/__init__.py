@@ -1,1 +1,1 @@
-"""Real robot deployment placeholders (reserved for future use)."""
+"""实机执行入口模块。"""

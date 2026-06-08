@@ -5,3 +5,9 @@ orin = "10.10.170.191"
 port = 9002
 grasp_port = 5000
 grasp_path = "/grasp"
+
+arm_type = "d1"
+arm_host = "192.168.123.100"
+arm_port = 8088
+calibration_path = "output/calibration_result.json"
+target_classes = "bottle"
