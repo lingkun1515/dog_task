@@ -31,6 +31,7 @@ class RobotConfig:
     target_y: float = 0.0       # 目标点 Y
     home_x: float = 0.0         # 回程目标 X（充电桩/原点）
     home_y: float = -10.0       # 回程目标 Y
+    arrival_threshold: float = 0.5  # 导航到达判定距离（需 ≤ 机械臂作业范围）
 
     # 机械臂类型（sim: piper/arx5/wx250s, real: d1）
     arm_type: str = ""
@@ -118,6 +119,7 @@ def load_robot_config(robot_id: str) -> RobotConfig:
             target_y=float(data.get("target_y", 0.0)),
             home_x=float(data.get("home_x", 0.0)),
             home_y=float(data.get("home_y", -10.0)),
+            arrival_threshold=float(data.get("arrival_threshold", 0.5)),
             arm_type=arm_type,
             tcp_body=tcp_body,
             arm_base_body=arm_base_body,

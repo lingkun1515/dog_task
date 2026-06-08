@@ -5,6 +5,7 @@ target_x = 12.0
 target_y = 0.0
 home_x = 0.0
 home_y = -10.0
+arrival_threshold = 0.4
 
 arm_type = "piper"
 tcp_body = "end_effector"

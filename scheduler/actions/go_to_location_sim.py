@@ -13,7 +13,7 @@ STATUS_POLL_INTERVAL = 1.0
 RETRY_DELAY_SECONDS = 1.0
 
 
-def _call_navigate(navigate_url: str, target_x: float, target_y: float, require_heading: bool = False, arrival_threshold: float = 1.0) -> bool:
+def _call_navigate(navigate_url: str, target_x: float, target_y: float, require_heading: bool = False, arrival_threshold: float = 0.5) -> bool:
     """发送导航请求到执行侧服务。"""
     payload = json.dumps({
         "x": target_x, "y": target_y,
@@ -64,7 +64,8 @@ def execute(fsm):
     for attempt in range(1, fsm.max_retries + 1):
         print(f"\n[状态: GO_TO_LOCATION] 导航到目标({target_x}, {target_y}) 第{attempt}次...")
         try:
-            if not _call_navigate(nav_url, target_x, target_y, require_heading=False, arrival_threshold=1.0):
+            threshold = getattr(fsm.config, "arrival_threshold", 0.5)
+            if not _call_navigate(nav_url, target_x, target_y, require_heading=False, arrival_threshold=threshold):
                 logger.warning("导航请求发送失败")
                 if attempt < fsm.max_retries:
                     time.sleep(RETRY_DELAY_SECONDS)

@@ -403,6 +403,7 @@ class SimulationScene:
     def _start_algo_grasp(self) -> None:
         """Run algorithm grasp in background thread."""
         if self._algo_running:
+            print("[scene] Algorithm grasp already running — ignoring duplicate request")
             return
         self._algo_running = True
 
