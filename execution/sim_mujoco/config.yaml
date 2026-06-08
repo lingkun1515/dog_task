@@ -33,7 +33,7 @@ default_angles: [0.1, 0.8, -1.5, -0.1, 0.8, -1.5,
 # Navigation parameters
 nav_linear_speed: 0.5        # m/s (base sliding speed)
 nav_angular_speed: 0.8       # rad/s
-nav_arrival_threshold: 0.25  # meters from target to consider "arrived"
+nav_arrival_threshold: 0.8  # meters from target to consider "arrived"
 nav_heading_threshold: 0.1   # radians (~5.7°) for heading alignment
 
 # Arm grasp pose (joint angles for Piper arm joints 1-6)
@@ -50,6 +50,7 @@ camera_height: 480
 
 # Algorithm-based grasp (New! Replaces hardcoded grasp_arm_angles when present)
 algorithms:
+  arm_kinematics: "mujoco"       # "mujoco" = MuJoCo FK (匹配 go2_piper MJCF)
   tcp_body: "end_effector"
   arm_base_body: "Piper"
   target_bodies: ["target_sphere"]

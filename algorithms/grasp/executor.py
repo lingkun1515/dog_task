@@ -44,8 +44,8 @@ class SimArmExecutor(ArmExecutor):
         self._arm_qpos_slice = slice(19, 25)  # qpos[19:25] = 6 arm joints
 
     def move_to_joints(self, angles: list[float], mode: int = 1, wait_time: float = 2.0) -> None:
-        # 写入专用变量，由主仿真循环在 RL policy 之后应用到 _target_dof_pos
-        self._robot._algo_arm_target = np.array(angles[:6], dtype=np.float64)
+        # IK 返回的是度，MuJoCo PD 控制需要弧度
+        self._robot._algo_arm_target = np.deg2rad(np.array(angles[:6], dtype=np.float64))
 
     def set_gripper(self, angle: float) -> None:
         # MuJoCo 仿真中的夹爪是 PD 控制的最后一段

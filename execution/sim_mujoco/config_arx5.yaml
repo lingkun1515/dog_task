@@ -18,7 +18,7 @@ default_angles: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
 
 nav_linear_speed: 0.5
 nav_angular_speed: 0.8
-nav_arrival_threshold: 0.25
+nav_arrival_threshold: 0.8
 nav_heading_threshold: 0.1
 
 # ARX5 arm grasp pose (placeholder — requires tuning)
@@ -27,6 +27,7 @@ grasp_step_duration: 0.02
 grasp_hold_duration: 1.0
 
 algorithms:
+  arm_kinematics: "mujoco"       # "mujoco" = MuJoCo FK (匹配 go2_arx5 MJCF)
   tcp_body: "x5_link6"
   arm_base_body: "x5_base_link"
   target_bodies: ["target_sphere"]

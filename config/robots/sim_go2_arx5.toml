@@ -1,6 +1,6 @@
 mode = "sim"
 execution_url = "http://localhost:8100"
-# 启动仿真时设置: SIM_CONFIG=execution/sim_mujoco/config_arx5.yaml
+# 启动仿真: SIM_CONFIG=execution/sim_mujoco/config_arx5.yaml
 target_x = 12.0
 target_y = 0.0
 home_x = 0.0

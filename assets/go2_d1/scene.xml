@@ -1,5 +1,5 @@
-<mujoco model="go2piper scene">
-  <include file="go2piper.xml"/>
+<mujoco model="go2_d1 scene">
+  <include file="go2d1.xml"/>
 
   <statistic center="0 0 0.1" extent="0.8"/>
 
@@ -12,19 +12,16 @@
   <asset>
     <texture type="skybox" builtin="gradient" rgb1="0.4 0.6 0.9" rgb2="0.05 0.05 0.15" width="512" height="3072"/>
 
-    <!-- Grass-like ground -->
     <texture name="grass_tex" type="2d" builtin="checker" mark="edge"
       rgb1="0.15 0.45 0.1" rgb2="0.1 0.35 0.08"
       markrgb="0.2 0.5 0.15" width="300" height="300"/>
     <material name="grass_mat" texture="grass_tex" texuniform="true" texrepeat="8 8" reflectance="0.1"/>
 
-    <!-- Path / road texture -->
     <texture name="path_tex" type="2d" builtin="checker" mark="edge"
       rgb1="0.55 0.5 0.4" rgb2="0.45 0.4 0.3"
       markrgb="0.5 0.45 0.35" width="100" height="100"/>
     <material name="path_mat" texture="path_tex" texuniform="true" texrepeat="2 2" reflectance="0.15"/>
 
-    <!-- Obstacle materials -->
     <material name="wood" rgba="0.6 0.4 0.2 1"/>
     <material name="cone_orange" rgba="1.0 0.5 0.1 1"/>
     <material name="flag_red" rgba="0.9 0.15 0.1 1"/>
@@ -36,65 +33,50 @@
   <worldbody>
     <light pos="6 -5 3" dir="-0.5 -0.3 -1" directional="true" diffuse="0.8 0.8 0.8"/>
 
-    <!-- Ground plane (grass) -->
     <geom name="floor" size="0 0 0.05" type="plane" material="grass_mat" friction="1.5 0.5 0.5"/>
 
-    <!-- ===== Path / road strip from start (0,-10) to target (12,0) ===== -->
     <body name="path" pos="6 -5 0.001">
       <geom name="path_strip" type="box" size="6 0.5 0.005" material="path_mat" friction="1.0 0.4 0.4"/>
     </body>
 
-    <!-- ===== Start area marker: flag behind robot start ===== -->
     <body name="start_flag" pos="-0.5 -10.5 0.02">
       <geom name="flag_pole" type="cylinder" size="0.03 1.2" material="pole_gray"/>
       <geom name="flag_banner" type="box" pos="0.15 0 1.1" size="0.18 0.005 0.12" material="flag_red"/>
-      <!-- Start platform -->
       <geom name="start_platform" type="box" pos="0 0 -0.01" size="0.4 0.4 0.02" rgba="0.7 0.7 0.7 1"/>
     </body>
 
-    <!-- ===== Target area: red cross marker on ground at (12, 0) ===== -->
     <body name="target_marker" pos="12 0 0.005">
       <geom name="cross_h" type="box" pos="0 0 0" size="0.3 0.05 0.005" rgba="0.9 0.1 0.1 1"/>
       <geom name="cross_v" type="box" pos="0 0 0" size="0.05 0.3 0.005" rgba="0.9 0.1 0.1 1"/>
-      <!-- Pole marker at target -->
-      <!-- <geom name="target_pole" type="cylinder" pos="0.3 0 0.3" size="0.03 0.3" rgba="0.9 0.15 0.1 1"/> -->
+      <geom name="target_pole" type="cylinder" pos="0.3 0 0.3" size="0.03 0.3" rgba="0.9 0.15 0.1 1"/>
     </body>
 
-    <!-- ===== Obstacles along path ===== -->
-
-    <!-- Traffic cone near start -->
     <body name="cone_1" pos="1.5 -9.2 0.02">
       <geom name="cone_1_geom" type="cylinder" size="0.08 0.25" material="cone_orange"/>
       <geom name="cone_1_top" type="cylinder" pos="0 0 0.2" size="0.04 0.1" rgba="1 1 1 1"/>
     </body>
 
-    <!-- Wooden box -->
     <body name="box_1" pos="4 -8.5 0.02">
       <geom name="box_1_geom" type="box" size="0.3 0.2 0.2" material="box_brown"/>
     </body>
 
-    <!-- Barrel -->
     <body name="barrel_1" pos="7 -7 0.02">
       <geom name="barrel_1_geom" type="cylinder" size="0.2 0.4" material="barrel_blue"/>
     </body>
 
-    <!-- Traffic cone near target -->
     <body name="cone_2" pos="10 -3 0.02">
       <geom name="cone_2_geom" type="cylinder" size="0.08 0.25" material="cone_orange"/>
       <geom name="cone_2_top" type="cylinder" pos="0 0 0.2" size="0.04 0.1" rgba="1 1 1 1"/>
     </body>
 
-    <!-- Concrete barrier -->
     <body name="barrier_1" pos="8.0 -2 0.02">
       <geom name="barrier_1_geom" type="box" size="0.5 0.15 0.25" rgba="0.7 0.65 0.6 1"/>
     </body>
 
-    <!-- Rock / boulder -->
     <body name="rock_1" pos="3 -6 0.02">
       <geom name="rock_1_geom" type="sphere" size="0.25" rgba="0.5 0.45 0.4 1"/>
     </body>
 
-    <!-- Target sphere for grasp demo (small ball at ~12m, reachable height) -->
     <body name="target_sphere" pos="12 0 0.28">
       <freejoint/>
       <geom name="target_ball" type="sphere" size="0.06" rgba="1.0 0.85 0.1 1" mass="0.03"/>

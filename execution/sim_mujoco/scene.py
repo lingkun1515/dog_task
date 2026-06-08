@@ -62,18 +62,27 @@ class SimulationScene:
         algo_cfg = cfg.get("algorithms")
         if algo_cfg and _ALGO_AVAILABLE:
             try:
-                tcp_body = algo_cfg["tcp_body"]
                 arm_base_body = algo_cfg["arm_base_body"]
                 target_bodies = algo_cfg["target_bodies"]
                 target_labels = algo_cfg.get("target_labels", target_bodies)
 
-                kinematics = SimArmKinematics(
-                    model=self.robot.model,
-                    data=self.robot.data,
-                    tcp_body_name=tcp_body,
-                    arm_base_body_name=arm_base_body,
-                    qpos_arm_slice=slice(19, 25),
-                )
+                arm_kinematics_type = algo_cfg.get("arm_kinematics", "d1")
+                if arm_kinematics_type == "d1":
+                    from algorithms.kinematics.sim_d1_ik import SimD1Kinematics
+                    kinematics = SimD1Kinematics(
+                        model=self.robot.model,
+                        data=self.robot.data,
+                        arm_base_body_name=arm_base_body,
+                    )
+                else:
+                    tcp_body = algo_cfg.get("tcp_body", arm_base_body)
+                    kinematics = SimArmKinematics(
+                        model=self.robot.model,
+                        data=self.robot.data,
+                        tcp_body_name=tcp_body,
+                        arm_base_body_name=arm_base_body,
+                        qpos_arm_slice=slice(19, 25),
+                    )
                 detector = SimObjectDetector(
                     model=self.robot.model,
                     data=self.robot.data,
