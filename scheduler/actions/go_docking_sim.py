@@ -11,9 +11,7 @@ NAV_TIMEOUT = 180.0
 STATUS_POLL_INTERVAL = 1.0
 RETRY_DELAY_SECONDS = 3.0
 
-# 回程目标：返回原点（充电桩位置）
-HOME_X = 0.0
-HOME_Y = 0.0
+# 回程目标：由配置文件 home_x / home_y 决定
 
 
 def execute(fsm):
@@ -27,7 +25,7 @@ def execute(fsm):
     for attempt in range(1, fsm.max_retries + 1):
         print(f"\n[状态: GO_DOCKING] 返回充电桩 第{attempt}次...")
         try:
-            payload = json.dumps({"x": HOME_X, "y": HOME_Y}).encode("utf-8")
+            payload = json.dumps({"x": fsm.config.home_x, "y": fsm.config.home_y, "require_heading": True}).encode("utf-8")
             request = urllib.request.Request(
                 nav_url, data=payload, method="POST",
                 headers={"Content-Type": "application/json"},
@@ -56,6 +54,16 @@ def execute(fsm):
             if arrived:
                 fsm.mark_metric("dock_arrived")
                 print("[动作完成] 已回到充电桩。")
+                # Stop all motion on the sim side
+                try:
+                    urllib.request.urlopen(
+                        urllib.request.Request(
+                            f"{fsm.config.execution_url}/api/stop", data=b"", method="POST"
+                        ),
+                        timeout=5,
+                    )
+                except Exception:
+                    pass
                 return RobotState.FINISHED
         except Exception as e:
             logger.error(f"[状态: GO_DOCKING] 返回充电桩异常: {e}")

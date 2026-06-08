@@ -1095,7 +1095,7 @@ def run(
 def run_server():
     import uvicorn
 
-    uvicorn.run("scheduler.server.app:app", host="0.0.0.0", port=8000)
+    uvicorn.run("scheduler.server.app:app", host="0.0.0.0", port=8200)
 
 
 if __name__ == "__main__":

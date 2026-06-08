@@ -16,23 +16,38 @@ kds: [0.8, 0.8, 0.8, 0.8, 0.8, 0.8,
       0.8, 0.8, 0.8, 0.8, 0.8, 0.8,
       1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
 
+# RL policy parameters
+action_scale: [0.25, 0.25, 0.25, 0.25, 0.25, 0.25,
+               0.25, 0.25, 0.25, 0.25, 0.25, 0.25,
+               0.25, 0.25, 0.25, 0.25, 0.25, 0.25]
+base_ang_vel_scale: 0.2
+joint_vel_scale: 0.05
+num_hist: 3
+
 # Default joint angles (standing pose)
 # Order: FR_hip/thigh/calf, FL_hip/thigh/calf, RR_hip/thigh/calf, RL_hip/thigh/calf, arm_j1..j6
 default_angles: [0.1, 0.8, -1.5, -0.1, 0.8, -1.5,
                  0.1, 1.0, -1.5, -0.1, 1.0, -1.5,
-                 0.0, 0.0, -0.0, 0.0, -0.0, 0.0]
+                 0.0, 0.8, -1.2, 0.0, -0.2, 0.0]
 
 # Navigation parameters
 nav_linear_speed: 0.5        # m/s (base sliding speed)
 nav_angular_speed: 0.8       # rad/s
-nav_arrival_threshold: 0.5   # meters from target to consider "arrived"
+nav_arrival_threshold: 0.25  # meters from target to consider "arrived"
 nav_heading_threshold: 0.1   # radians (~5.7°) for heading alignment
 
 # Arm grasp pose (joint angles for Piper arm joints 1-6)
-grasp_arm_angles: [0.3, 1.5, -2.2, 0.5, -1.0, 0.0]
+# Joint order: j1(base_rot), j2(shoulder_pitch), j3(elbow), j4(wrist_roll), j5(wrist_pitch), j6(wrist_roll)
+# joint2 > 1.57 leans arm forward past horizontal; joint3 < 0 bends elbow downward
+# Target ball is at z≈0.28, arm base at z≈0.56 — arm reaches ~0.25m forward + ~0.28m down
+grasp_arm_angles: [0.0, 2.5, -2.0, 0.0, -0.8, 0.0]
 grasp_step_duration: 0.02    # seconds per interpolation step
 grasp_hold_duration: 1.0     # seconds to hold grasp pose
 
 # Camera
 camera_width: 640
 camera_height: 480
+
+# Desktop visualisation window (used with --render flag)
+window_width: 1200
+window_height: 900

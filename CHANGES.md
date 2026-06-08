@@ -1,0 +1,239 @@
+# 调度后台与前端改动记录
+
+本文档记录 DogTaskSim 的 `scheduler/` 调度后台与前端代码，相对于原 Mower 项目 (`/home/lenovo/Projects/MowerProject/Mower/mower/`) 的所有改动。后续改动也需同步更新本文档。
+
+---
+
+## 架构概述
+
+原 Mower 是单一实机模式：FSM 状态机通过 TCP Socket 与真实机器人底盘通信，通过 HTTP 与机械臂抓取服务通信。DogTaskSim 新增了仿真模式，FSM 逻辑和前端 UI 完全复用，仅底层通信模块不同。
+
+```
+原 Mower:           FSM → TCP Socket (底盘) + HTTP (抓取)
+DogTaskSim (sim):   FSM → HTTP (仿真执行服务)
+DogTaskSim (real):  FSM → TCP Socket (底盘) + HTTP (抓取)   ← 原逻辑保留
+```
+
+---
+
+## 1. config.py — RobotConfig 与配置加载
+
+### 新增字段
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `mode` | `str` | `"real"` | 运行模式：`"real"` 或 `"sim"` |
+| `execution_url` | `str` | `""` | 仿真执行侧 HTTP 服务地址（如 `http://localhost:8100`） |
+| `target_x` | `float` | `5.0` | 仿真导航目标点 X 坐标 |
+| `target_y` | `float` | `0.0` | 仿真导航目标点 Y 坐标 |
+
+### 新增方法
+
+- `navigate_url()` — 返回导航 POST 接口地址（sim 模式下指向 `execution_url/api/navigate`）
+- `navigate_status_url()` — 返回导航状态轮询地址
+- `grasp_status_url()` — 返回抓取状态轮询地址（sim 模式下指向 `execution_url/api/grasp/status`）
+
+### 修改行为
+
+- `grasp_url` 和 `video_feed_url()` 根据 `mode` 选择 URL 前缀（sim 用 `execution_url`，real 用 `orin`）
+- `video_feed_url(detect=...)` — sim 模式下关闭检测叠加层
+- `host` / `orin` 改为可选（sim 模式下不需要）
+- `load_robot_config()` 根据 `mode` 字段选择不同的校验逻辑
+
+### 环境变量
+
+`MOWER_CONFIG_DIR` → `SCHEDULER_CONFIG_DIR`
+
+---
+
+## 2. fsm.py — 状态机调度
+
+### 双模式处理器分发
+
+原 FSM 只有一个处理器映射表 `_HANDLERS`。DogTaskSim 拆分为两个：
+
+```python
+_HANDLERS_REAL = {
+    GO_TO_LOCATION: go_to_location,     # TCP 通信
+    PICK_AND_PUT: pick_and_put,         # HTTP 阻塞调用
+    GO_DOCKING: go_docking,             # TCP 通信
+}
+_HANDLERS_SIM = {
+    GO_TO_LOCATION: go_to_location_sim, # HTTP 导航 + 轮询
+    PICK_AND_PUT: pick_and_put_sim,     # HTTP 抓取 + 轮询
+    GO_DOCKING: go_docking_sim,         # HTTP 导航 + 轮询
+}
+```
+
+构造函数根据 `config.mode` 选择处理器映射表。`_execute_current_state()` 改为动态分发。
+
+### 文案修改
+
+- 任务提示语从"充电桩 → 指定地点 → 捡垃圾+放垃圾 → 回充电桩"改为"充电桩 → 目标点 → 抓取 → 回充电桩"
+
+---
+
+## 3. states.py — 无改动
+
+`RobotState` 枚举完全不变：`GO_TO_LOCATION`, `PICK_AND_PUT`, `GO_DOCKING`, `FINISHED`, `FAILED`。
+
+---
+
+## 4. actions/ — 动作实现
+
+### 4.1 新增文件（仿真模式）
+
+| 文件 | 通信方式 | 说明 |
+|------|----------|------|
+| `go_to_location_sim.py` | HTTP POST + 轮询 | 向仿真服务发送导航目标，每 1s 轮询状态直到 `"arrived"` |
+| `pick_and_put_sim.py` | HTTP POST + 轮询 | 向仿真服务发起抓取，每 1s 轮询状态直到 `"success"` |
+| `go_docking_sim.py` | HTTP POST + 轮询 | 向仿真服务发送原点目标 (0,0)，轮询直到 `"arrived"` |
+
+### 4.2 与原实机动作的差异
+
+| 特性 | 实机动作 (原) | 仿真动作 (新) |
+|------|--------------|--------------|
+| 导航 | TCP Socket `conn.go_to_location()` | HTTP POST `/api/navigate` + 轮询 |
+| 抓取 | 单次阻塞 HTTP（超时 180s） | HTTP POST + 每 1s 轮询（两阶段） |
+| 回充 | TCP Socket `conn.go_docking()` | HTTP POST `/api/navigate` (0,0) + 轮询 |
+| 心跳 | 抓取时独立线程每 10s 发送 | 轮询循环内每 1s 直接调用 `fsm.emit_heartbeat()` |
+| 目标 | 隐式（底盘协议内部决定） | 显式 `target_x`/`target_y` 来自 TOML 配置 |
+| 抓取结果解析 | 解析 `target.type/conf/depth_m` 等 | 仅检查 `status == "success"` |
+
+### 4.3 保留不变的文件
+
+- `connection.py` — 实机 TCP Socket 连接
+- `go_to_location.py` — 实机 TCP 导航
+- `pick_and_put.py` — 实机 HTTP 抓取
+- `go_docking.py` — 实机 TCP 回充
+
+---
+
+## 5. server/app.py — FastAPI Web 控制台
+
+### 5.1 移除的功能
+
+- **D1 机械臂 WebRTC 遥操作桥接**：`arm.py`、`arm_bridge.py` 导入及 FastAPI lifespan 全部移除
+- **`/api/teleop/` 路由注册**：不再注册 `arm_router`
+- **Husqvarna logo 图片**：header 中不再显示 logo
+- **FastAPI lifespan 参数**：改为无 lifespan 的普通模式
+
+### 5.2 新增功能
+
+- `/run` 端点根据 `config.mode` 选择 `_ACTION_HANDLERS_SIM` 或 `_ACTION_HANDLERS_REAL`
+- `TaskRunRecorder.open()` 传入 `mode` 和 `execution_url` 字段
+- 单步动作验证使用模式感知的处理器字典
+
+### 5.3 品牌重命名
+
+| 原文本 | 新文本 |
+|--------|--------|
+| Husqvarna Outdoor Task Robot Demo | DogTask——机器人移动抓取任务系统 |
+| Others avoid obstacles. We clear them. | Go2 + Piper · 仿真与实机统一调度 |
+| Husqvarna FSM Server | DogTask FSM Server |
+| 场景：lawn_debris / golf_ball | 场景：sim_grasp_demo / real_lawn_debris |
+
+### 5.4 模块路径
+
+- uvicorn 启动目标：`"mower.server.app:app"` → `"scheduler.server.app:app"`
+
+---
+
+## 6. server/robot.py — 机器人列表
+
+### 修改
+
+- `DEFAULT_ROBOT_ID`: `"239"` → `"sim_go2_piper"`
+- 环境变量：`MOWER_ROBOT_ID` → `SCHEDULER_ROBOT_ID`
+
+---
+
+## 7. 前端 (内联 HTML/CSS/JS)
+
+### 7.1 HTML 结构
+
+- `<title>`: "Husqvarna Outdoor Task Robot Demo" → "DogTask——机器人移动抓取任务系统"
+- Header h1: 同上
+- Header p: "Others avoid obstacles. We clear them." → "Go2 + Piper · 仿真与实机统一调度"
+- 移除 Husqvarna logo `<img>`
+- CSS variable `--hz-green` 保持不变（仍使用 Husqvarna 绿色主题）
+
+### 7.2 场景选项
+
+```javascript
+// 原
+SCENE_OPTIONS = [
+  { value: 'lawn_debris', disabled: false },
+  { value: 'golf_ball', disabled: true },
+  ...
+];
+// 新
+SCENE_OPTIONS = [
+  { value: 'sim_grasp_demo', disabled: false },
+  { value: 'real_lawn_debris', disabled: true },
+  ...
+];
+```
+
+### 7.3 视频流
+
+- `video_feed_url()` 调用 `detect=(config.mode != "sim")` — 仿真模式不启用检测叠加
+
+### 7.4 其余不变
+
+- 时间线 8 步 UI（STEP_IDS 数组）
+- SSE EventSource 通信
+- 中/英文切换（I18N）
+- 任务回执弹窗
+- `localStorage` key 仍用 `mower_lang`（兼容）
+
+---
+
+## 8. 后续改动记录
+
+_后续改动按时间倒序记录于此。_
+
+### 2026-06-08
+
+- **RL 策略集成**：新增 `execution/sim_mujoco/policy_runner.py`，将 TorchScript RL 策略接入仿真循环，实现真实的四足步态行走（替代原有滑动模式）
+- **键盘遥操作**：新增 `execution/sim_mujoco/keyboard_teleop.py`，支持 WASD/QE 控制底盘、IJKL/UO 控制机械臂、Space 触发抓取
+- **仿真配置增强**：`config.yaml` 新增 `action_scale`, `base_ang_vel_scale`, `joint_vel_scale`, `num_hist` 等 RL 策略参数
+- **抓取优化**：`nav_arrival_threshold` 从 0.5m 减小到 0.25m；`grasp_arm_angles` 调整为更前伸向下的位姿
+- **竞态修复**：`scene.py` 中 `navigate_to`/`start_grasp`/`cancel_navigation`/`cancel_grasp` 调用后立即刷新快照，防止状态轮询读到过期状态
+- **端到端测试通过**（2026-06-08）：
+  - 完整 SSE 时间线验证：`ack → go_to_B → arrived_B_confirmed → arm_start → arm_done → return_A → done`
+  - RL 步态行走速度约 0.3-0.5 m/s，32s 完成 15.6m 导航，33s 完成 12m 回程
+  - 仿真抓取耗时约 3s（moving_to_grasp → holding → success）
+  - 所有 API 端点正常：health, navigate, navigate/status, grasp, grasp/status, state, reset, video_feed
+  - 错误处理正常：非法 action 返回明确错误信息
+  - 注意：headless EGL 模式下 video_feed 可能无图像输出，GUI 模式下正常
+
+### 2026-06-08（第二轮修复）
+
+- **键盘遥操作修复**：`server.py` GUI 模式下遗漏 `_scene.enable_keyboard()` 调用，导致 `_kb_controller` 始终为 None，键盘遥操作完全不生效。已在 `main()` 中补充该调用
+- **鼠标拖放视角修复**：`viewer.py` 鼠标回调在首次按下时未初始化 `_last_x/_last_y`，导致首次拖拽产生视角跳变。已在 `_mouse_button_callback` 按下分支中加入光标位置捕获
+- **场景丰富**：`scene.xml` 全面改写 — 新增草地纹理地面、泥土路径（6m×1m）、起点旗杆+红色旗帜+平台、目标红十字标记+标杆、6 个障碍物（锥桶、木箱、桶、锥桶2、混凝土路障、岩石），目标球缩小至 radius=0.06 并置于 z=0.28m 高度
+- **机械臂抓取修复**：
+  - 目标球从 radius=0.1 缩小到 0.06，z 从 0.15 升高到 0.28（更接近机械臂可达范围）
+  - `config.yaml` 中 `default_angles` 机械臂部分从全零改为 `[0.0, 0.8, -1.2, 0.0, -0.2, 0.0]`（自然前倾默认位姿）
+  - `grasp_arm_angles` 调整为 `[0.0, 2.5, -2.0, 0.0, -0.8, 0.0]`，joint2=2.5rad（远超水平 90deg），机械臂末端明确向下伸展
+  - `grasp.py` 误差阈值从 0.12 rad 放宽到 0.35 rad，解决 PD 控制器稳态误差导致状态机卡在 MOVING_TO_GRASP 的问题
+  - 验证：joint2 峰值达 3.0 rad（接近垂直向下），抓取状态机正确流转：moving_to_grasp -> holding -> returning -> success
+- **E2E 回归测试通过**（2026-06-08 第二轮）：
+  - 完整流程 54s：导航 24s + 抓取 2s + 回程 28s，总计约 27.6m 行走距离
+  - 所有 7 个 SSE 时间线事件正常：ack -> go_to_B -> arrived_B_confirmed -> arm_start -> arm_done -> return_A -> done
+  - 最终状态：FINISHED
+
+### 2026-06-08（第三轮修复）
+
+- **回程目标点修正**：`go_docking_sim.py` 硬编码 `HOME=(0,0)` 导致回程目标错误（机器人起始位置是 (0,-10)）。改为从 `RobotConfig.home_x`/`home_y` 读取，默认值 (0, -10)。`sim_go2_piper.toml` 新增 `home_x=0.0`、`home_y=-10.0` 字段
+- **导航朝向可选**：`NavigationController.set_target()` 新增 `require_heading` 和 `arrival_threshold` 参数
+  - 去程（`go_to_location_sim`）：`require_heading=False`, `arrival_threshold=1.0m` — 不需要朝向对齐，距离目标 1m 即判断到达
+  - 回程（`go_docking_sim`）：`require_heading=True` — 需要朝向对齐以正确回桩
+- **任务完成后停止运动**：新增 `/api/stop` 端点，`go_docking_sim` 在到达回程目标后调用，确保导航和抓取控制器完全停止，避免残留运动
+- **相机视频流修复**：
+  - 安装 Pillow 库（JPEG 编码必需）
+  - `camera.py` 重构：GUI 模式下复用 Viewer 的 `MjrContext`（共享 GL 上下文），headless 模式下尝试自建 EGL 上下文
+  - 系统无 EGL/OSMesa 支持，headless 模式下相机不可用（已知限制），GUI 模式（`--render`）下正常
+- **调度端口修改**：默认端口从 8000 改为 8200
+- **旗子位置调整**：从 (0,-10) 移到 (-0.5,-10.5)，避免机械臂初始化时碰到旗杆

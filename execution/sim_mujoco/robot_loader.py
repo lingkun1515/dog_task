@@ -6,8 +6,7 @@ import os
 from pathlib import Path
 
 # Off-screen rendering requires EGL or OSMesa — set before mujoco import.
-if "MUJOCO_GL" not in os.environ:
-    os.environ["MUJOCO_GL"] = "egl"
+os.environ.setdefault("MUJOCO_GL", "egl")
 
 import mujoco
 import numpy as np

@@ -14,3 +14,4 @@ build/
 MUJOCO_LOG.TXT
 logs/
 .vscode/
+.claude/

@@ -29,6 +29,8 @@ class RobotConfig:
     execution_url: str = ""     # 仿真/执行侧 HTTP 服务地址
     target_x: float = 5.0       # 目标点 X（仿真导航用）
     target_y: float = 0.0       # 目标点 Y
+    home_x: float = 0.0         # 回程目标 X（充电桩/原点）
+    home_y: float = -10.0       # 回程目标 Y
 
     @property
     def grasp_url(self) -> str:
@@ -89,6 +91,8 @@ def load_robot_config(robot_id: str) -> RobotConfig:
             execution_url=str(execution_url),
             target_x=float(data.get("target_x", 5.0)),
             target_y=float(data.get("target_y", 0.0)),
+            home_x=float(data.get("home_x", 0.0)),
+            home_y=float(data.get("home_y", -10.0)),
         )
 
     host = data.get("host")
