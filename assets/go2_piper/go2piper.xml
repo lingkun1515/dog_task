@@ -1,5 +1,5 @@
 <mujoco model="go2_piper">
-  <compiler angle="radian" meshdir="assets" autolimits="true" />
+  <compiler angle="radian" meshdir=".." autolimits="true" />
 
   <option cone="elliptic" impratio="100" />
 
@@ -55,35 +55,35 @@
 
 
     <!-- go2 -->
-    <mesh file="assets/base_0.stl" />
-    <mesh file="assets/base_1.stl" />
-    <mesh file="assets/base_2.stl" />
-    <mesh file="assets/base_3.stl" />
-    <mesh file="assets/base_4.stl" />
-    <mesh file="assets/hip_0.stl" />
-    <mesh file="assets/hip_1.stl" />
-    <mesh file="assets/thigh_0.stl" />
-    <mesh file="assets/thigh_1.stl" />
-    <mesh file="assets/thigh_mirror_0.stl" />
-    <mesh file="assets/thigh_mirror_1.stl" />
-    <mesh file="assets/calf_0.stl" />
-    <mesh file="assets/calf_1.stl" />
-    <mesh file="assets/calf_mirror_0.stl" />
-    <mesh file="assets/calf_mirror_1.stl" />
-    <mesh file="assets/foot.stl" />
+    <mesh file="go2/meshes/base_0.stl" />
+    <mesh file="go2/meshes/base_1.stl" />
+    <mesh file="go2/meshes/base_2.stl" />
+    <mesh file="go2/meshes/base_3.stl" />
+    <mesh file="go2/meshes/base_4.stl" />
+    <mesh file="go2/meshes/hip_0.stl" />
+    <mesh file="go2/meshes/hip_1.stl" />
+    <mesh file="go2/meshes/thigh_0.stl" />
+    <mesh file="go2/meshes/thigh_1.stl" />
+    <mesh file="go2/meshes/thigh_mirror_0.stl" />
+    <mesh file="go2/meshes/thigh_mirror_1.stl" />
+    <mesh file="go2/meshes/calf_0.stl" />
+    <mesh file="go2/meshes/calf_1.stl" />
+    <mesh file="go2/meshes/calf_mirror_0.stl" />
+    <mesh file="go2/meshes/calf_mirror_1.stl" />
+    <mesh file="go2/meshes/foot.stl" />
 
     <!-- piper -->
   
-    <mesh name="arm_base_link" file="assets/base_link.STL" />
-    <mesh name="link1" file="assets/link1.STL" />
-    <mesh name="link2" file="assets/link2.STL" />
-    <mesh name="link3" file="assets/link3.STL" />
-    <mesh name="link4" file="assets/link4.STL" />
-    <mesh name="link5" file="assets/link5.STL" />
-    <mesh name="link6" file="assets/link6.STL" />
-    <mesh name="gripper_base" file="assets/gripper_base.STL" />
-    <mesh name="link7" file="assets/link7.STL" />
-    <mesh name="link8" file="assets/link8.STL" />
+    <mesh name="arm_base_link" file="piper/meshes/base_link.STL" />
+    <mesh name="link1" file="piper/meshes/link1.STL" />
+    <mesh name="link2" file="piper/meshes/link2.STL" />
+    <mesh name="link3" file="piper/meshes/link3.STL" />
+    <mesh name="link4" file="piper/meshes/link4.STL" />
+    <mesh name="link5" file="piper/meshes/link5.STL" />
+    <mesh name="link6" file="piper/meshes/link6.STL" />
+    <mesh name="gripper_base" file="piper/meshes/gripper_base.STL" />
+    <mesh name="link7" file="piper/meshes/link7.STL" />
+    <mesh name="link8" file="piper/meshes/link8.STL" />
 
   </asset>
 
@@ -104,6 +104,7 @@
       <geom size="0.05 0.045" pos="0.285 0 0.01" type="cylinder" class="collision" />
       <geom size="0.047" pos="0.293 0 -0.06" class="collision" />
       <site name="imu" pos="0 0 0.01" />
+      <camera name="front_cam" pos="0.28 0 0.08" xyaxes="0 -1 0 0 0 1" fovy="60" />
       <body name="FL_hip" pos="0.1934 0.0465 0">
         <inertial pos="-0.0054 0.00194 -0.000105" quat="0.497014 0.499245 0.505462 0.498237"
           mass="0.678"

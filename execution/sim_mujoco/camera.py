@@ -2,24 +2,17 @@
 
 from __future__ import annotations
 
-import os
 import threading
-import time
 
 import mujoco
 import numpy as np
-
-# MuJoCo 3.x headless rendering requires EGL or OSMesa.
-# Try EGL first (most common on Linux); fall back to OSMesa.
-if "MUJOCO_GL" not in os.environ:
-    os.environ["MUJOCO_GL"] = "egl"
 
 
 class SimulationCamera:
     """Wraps a MuJoCo camera for off-screen rendering.
 
-    If off-screen rendering fails (no GL), renders are silently skipped
-    and ``get_frame()`` returns None.
+    In GUI mode, re-uses the Viewer's MjrContext (shared GL context).
+    In headless mode without EGL/OSMesa, renders are silently skipped.
     """
 
     def __init__(
@@ -28,20 +21,21 @@ class SimulationCamera:
         data: mujoco.MjData,
         width: int = 640,
         height: int = 480,
+        context: mujoco.MjrContext | None = None,
     ):
         self.model = model
         self.data = data
         self.width = width
         self.height = height
 
-        self._ok = False
-
-        try:
-            self._scene = mujoco.MjvScene(model, maxgeom=10000)
-            self._context = mujoco.MjrContext(
-                model, mujoco.mjtFontScale.mjFONTSCALE_150
-            )
-            self._cam = mujoco.MjvCamera()
+        self._scene = mujoco.MjvScene(model, maxgeom=10000)
+        self._cam = mujoco.MjvCamera()
+        # Use the body-fixed front_cam if present, otherwise fall back to tracking
+        cam_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, "front_cam")
+        if cam_id >= 0:
+            self._cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
+            self._cam.fixedcamid = cam_id
+        else:
             self._cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
             self._cam.trackbodyid = mujoco.mj_name2id(
                 model, mujoco.mjtObj.mjOBJ_BODY, "base_link"
@@ -49,13 +43,22 @@ class SimulationCamera:
             self._cam.distance = 3.0
             self._cam.elevation = -25
             self._cam.azimuth = 90
-            self._opt = mujoco.MjvOption()
-            self._ok = True
-        except Exception:
-            self._scene = None
-            self._context = None
-            self._cam = None
-            self._opt = None
+        self._opt = mujoco.MjvOption()
+
+        self._context = context  # shared from Viewer in GUI mode
+        self._own_context = False
+
+        if self._context is None:
+            # Try to create our own off-screen context (headless EGL/OSMesa)
+            try:
+                self._context = mujoco.MjrContext(
+                    model, mujoco.mjtFontScale.mjFONTSCALE_150
+                )
+                self._own_context = True
+            except Exception:
+                self._context = None
+
+        self._ok = self._context is not None
 
         self._latest_frame: bytes | None = None
         self._lock = threading.Lock()
@@ -66,7 +69,7 @@ class SimulationCamera:
 
     def render(self) -> None:
         """Render current view and store JPEG bytes. No-op if unavailable."""
-        if not self._ok:
+        if not self._ok or self._context is None:
             return
 
         viewport = mujoco.MjrRect(0, 0, self.width, self.height)
@@ -87,7 +90,6 @@ class SimulationCamera:
 
         try:
             from io import BytesIO
-
             from PIL import Image
 
             img = Image.fromarray(rgb)
@@ -95,7 +97,7 @@ class SimulationCamera:
             img.save(buf, format="JPEG", quality=80)
             jpeg = buf.getvalue()
         except ImportError:
-            jpeg = rgb.tobytes()
+            return
 
         with self._lock:
             self._latest_frame = jpeg
