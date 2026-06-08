@@ -12,4 +12,5 @@ build/
 *~
 .DS_Store
 MUJOCO_LOG.TXT
+logs/
 .vscode/
