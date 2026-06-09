@@ -14,6 +14,8 @@ def execute(fsm):
     logger.info("GO_TO_LOCATION: 导航到目标点 (%.2f, %.2f)", fsm.config.target_x, fsm.config.target_y)
     fsm.notify_timeline("go_to_B")
 
+    http_post(f"{fsm.config.execution_url}/api/detect/enable")
+
     threshold = getattr(fsm.config, "arrival_threshold", 0.5)
     payload = {
         "x": fsm.config.target_x,

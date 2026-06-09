@@ -59,6 +59,7 @@ class PassiveViewer:
         _glfw.glfw.swap_interval(1)
 
         self._window = window
+        self._model = model
         self._context = mujoco.MjrContext(model, mujoco.mjtFontScale.mjFONTSCALE_150)
         self._scene = mujoco.MjvScene(model, maxgeom=10000)
         self._cam = mujoco.MjvCamera()
@@ -89,7 +90,7 @@ class PassiveViewer:
     def _scroll_callback(self, window, xoffset: float, yoffset: float) -> None:
         if self._cam is not None:
             mujoco.mjv_moveCamera(
-                mujoco.mjtMouse.mjMOUSE_ZOOM, 0.0, yoffset * 0.05, self._scene, self._cam
+                self._model, mujoco.mjtMouse.mjMOUSE_ZOOM, 0.0, yoffset * 0.05, self._scene, self._cam
             )
 
     def _mouse_button_callback(self, window, button: int, action: int, mods: int) -> None:
@@ -116,15 +117,15 @@ class PassiveViewer:
 
         if self._button_left:
             mujoco.mjv_moveCamera(
-                mujoco.mjtMouse.mjMOUSE_ROTATE_V, dx * 0.005, dy * 0.005, self._scene, self._cam
+                self._model, mujoco.mjtMouse.mjMOUSE_ROTATE_V, dx * 0.005, dy * 0.005, self._scene, self._cam
             )
         elif self._button_middle:
             mujoco.mjv_moveCamera(
-                mujoco.mjtMouse.mjMOUSE_MOVE_V, dx * 0.01, dy * 0.01, self._scene, self._cam
+                self._model, mujoco.mjtMouse.mjMOUSE_MOVE_V, dx * 0.01, dy * 0.01, self._scene, self._cam
             )
         elif self._button_right:
             mujoco.mjv_moveCamera(
-                mujoco.mjtMouse.mjMOUSE_ROTATE_H, dx * 0.005, dy * 0.005, self._scene, self._cam
+                self._model, mujoco.mjtMouse.mjMOUSE_ROTATE_H, dx * 0.005, dy * 0.005, self._scene, self._cam
             )
 
     def _key_callback(self, window, key: int, scancode: int, action: int, mods: int) -> None:

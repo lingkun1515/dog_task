@@ -14,6 +14,8 @@ def execute(fsm):
     logger.info("GO_DOCKING: 返回充电桩 (%.2f, %.2f)", fsm.config.home_x, fsm.config.home_y)
     fsm.notify_timeline("return_A")
 
+    http_post(f"{fsm.config.execution_url}/api/detect/disable")
+
     payload = {
         "x": fsm.config.home_x,
         "y": fsm.config.home_y,

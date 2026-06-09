@@ -182,8 +182,11 @@ def navigate_cancel() -> dict[str, str]:
 # ---------------------------------------------------------------------------
 @app.post("/api/grasp")
 def grasp() -> dict[str, str]:
-    """Start the grasp sequence."""
+    """Start the grasp sequence (only when detect is enabled)."""
     scene = get_scene()
+    if not scene._detect_enabled:
+        logger.warning("抓取请求被拒绝: 检测未启用（非抓取阶段）")
+        return JSONResponse(status_code=409, content={"status": "rejected", "detail": "detect not enabled"})
     logger.info("抓取请求: 启动抓取序列")
     scene.start_grasp()
     return {"status": "accepted"}
