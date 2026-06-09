@@ -327,29 +327,47 @@ class SimObjectDetector(ObjectDetector):
         """检测流水线：YOLO → HSV → xpos 兜底。"""
         rgb = self._camera.get_rgb()
         if rgb is None:
+            logger.debug("[detect] 无 RGB 帧，回退到 xpos")
             return self._detect_from_xpos()
+
+        logger.debug("[detect] RGB 帧尺寸: %s dtype=%s", rgb.shape, rgb.dtype)
 
         # 1. YOLO
         dets = self._detect_yolo()
         if dets:
             for d in dets:
-                logger.debug("YOLO: %s conf=%.2f pixel=(%d,%d) depth=%.3fm",
-                             d.label, d.confidence, d.center_pixel[0], d.center_pixel[1], d.depth_m)
+                logger.info("[detect/YOLO] %s conf=%.2f pixel=(%d,%d) bbox=(%d,%d,%d,%d) depth=%.3fm pos_cam=(%.3f,%.3f,%.3f)",
+                            d.label, d.confidence,
+                            d.center_pixel[0], d.center_pixel[1],
+                            d.bbox[0], d.bbox[1], d.bbox[2], d.bbox[3],
+                            d.depth_m,
+                            d.position_cam[0], d.position_cam[1], d.position_cam[2])
             return dets
 
         # 2. HSV fallback
         dets = self._detect_hsv()
         if dets:
             for d in dets:
-                logger.debug("HSV: %s pixel=(%d,%d) depth=%.3fm",
-                             d.label, d.center_pixel[0], d.center_pixel[1], d.depth_m)
+                logger.info("[detect/HSV] %s pixel=(%d,%d) bbox=(%d,%d,%d,%d) depth=%.3fm pos_cam=(%.3f,%.3f,%.3f)",
+                            d.label,
+                            d.center_pixel[0], d.center_pixel[1],
+                            d.bbox[0], d.bbox[1], d.bbox[2], d.bbox[3],
+                            d.depth_m,
+                            d.position_cam[0], d.position_cam[1], d.position_cam[2])
             return dets
 
         # 3. xpos 兜底
         dets = self._detect_from_xpos()
         if dets:
             for d in dets:
-                logger.debug("xpos: %s depth=%.3fm", d.label, d.depth_m)
+                logger.info("[detect/xpos] %s pixel=(%d,%d) bbox=(%d,%d,%d,%d) depth=%.3fm pos_cam=(%.3f,%.3f,%.3f)",
+                            d.label,
+                            d.center_pixel[0], d.center_pixel[1],
+                            d.bbox[0], d.bbox[1], d.bbox[2], d.bbox[3],
+                            d.depth_m,
+                            d.position_cam[0], d.position_cam[1], d.position_cam[2])
+        else:
+            logger.warning("[detect] 全部管线均未检测到目标")
         return dets
 
     def _detect_yolo(self) -> list[Detection]:
@@ -389,17 +407,25 @@ class SimObjectDetector(ObjectDetector):
         if now - self._cache_time >= self._cache_interval:
             try:
                 self._cached_detections = self.detect()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error("[annotate] detect 异常: %s", e)
             self._cache_time = now
 
         annotated = rgb.copy()
+        img_h, img_w = annotated.shape[:2]
+
         for det in self._cached_detections:
             x, y, w, h = det.bbox
             cx, cy = det.center_pixel
             depth_label = f"{det.depth_m:.2f}m" if det.depth_m > 0 else "?m"
             conf_label = f"{det.confidence:.0%}" if det.confidence < 1.0 else ""
             label_text = f"{det.label} {depth_label} {conf_label}".strip()
+
+            in_bounds = (0 <= cx < img_w and 0 <= cy < img_h)
+            logger.info(
+                "[annotate] %s pixel=(%d,%d) bbox=(%d,%d,%d,%d) img=%dx%d in_bounds=%s depth=%.3fm",
+                det.label, cx, cy, x, y, w, h, img_w, img_h, in_bounds, det.depth_m,
+            )
 
             color = _COLORS.get(det.label, (0, 255, 0))
             cv2.rectangle(annotated, (x, y), (x + w, y + h), color, 2)
@@ -430,8 +456,17 @@ class SimObjectDetector(ObjectDetector):
                 z = max(pos_cam[2], 0.001)
                 px = int(fx * pos_cam[0] / z + cxi)
                 py = int(fy * pos_cam[1] / z + cyi)
+                logger.debug(
+                    "[xpos] %s world=(%.3f,%.3f,%.3f) cam_cv=(%.3f,%.3f,%.3f) "
+                    "intrinsics(fx=%.1f,fy=%.1f,cx=%.1f,cy=%.1f) → pixel=(%d,%d)",
+                    label, world_pos[0], world_pos[1], world_pos[2],
+                    pos_cam[0], pos_cam[1], pos_cam[2],
+                    fx, fy, cxi, cyi, px, py,
+                )
             else:
                 px, py = 0, 0
+                logger.warning("[xpos] %s world=(%.3f,%.3f,%.3f) → cam 转换失败",
+                               label, world_pos[0], world_pos[1], world_pos[2])
 
             detections.append(Detection(
                 label=label,
@@ -447,6 +482,16 @@ class SimObjectDetector(ObjectDetector):
         """世界坐标 → OpenCV 相机坐标（X 右、Y 下、Z 前）。"""
         cam_xpos = self._data.cam_xpos[self._cam_id]
         cam_xmat = self._data.cam_xmat[self._cam_id].reshape(3, 3)
-        pos_mj = cam_xmat.T @ (world_pos - cam_xpos)
+        delta = world_pos - cam_xpos
+        pos_mj = cam_xmat.T @ delta
         # MuJoCo cam (X right, Y up, Z back) → OpenCV cam (X right, Y down, Z forward)
-        return np.array([pos_mj[0], -pos_mj[1], -pos_mj[2]])
+        pos_cv = np.array([pos_mj[0], -pos_mj[1], -pos_mj[2]])
+        logger.debug(
+            "[world_to_cam] cam_xpos=(%.3f,%.3f,%.3f) delta=(%.3f,%.3f,%.3f) "
+            "pos_mj=(%.3f,%.3f,%.3f) → pos_cv=(%.3f,%.3f,%.3f)",
+            cam_xpos[0], cam_xpos[1], cam_xpos[2],
+            delta[0], delta[1], delta[2],
+            pos_mj[0], pos_mj[1], pos_mj[2],
+            pos_cv[0], pos_cv[1], pos_cv[2],
+        )
+        return pos_cv

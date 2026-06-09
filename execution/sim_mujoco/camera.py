@@ -9,10 +9,13 @@ D455 matching:
 
 from __future__ import annotations
 
+import logging
 import threading
 
 import mujoco
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 class SimRGBDCamera:
@@ -88,6 +91,9 @@ class SimRGBDCamera:
             fovy = float(self.model.cam_fovy[self._cam_id])
             res = self.model.cam_resolution[self._cam_id]
             cam_w, cam_h = int(res[0]), int(res[1])
+            # MJCF cam_resolution defaults to [0,0] when not specified
+            if cam_w <= 0 or cam_h <= 0:
+                cam_w, cam_h = self.width, self.height
         else:
             fovy = 65.0
             cam_w, cam_h = self.width, self.height
@@ -103,6 +109,11 @@ class SimRGBDCamera:
             "height": cam_h,
             "fovy": fovy,
         }
+        logger.info(
+            "[camera] intrinsics: %dx%d fovy=%.1f° fx=%.1f fy=%.1f cx=%.1f cy=%.1f (render=%dx%d)",
+            cam_w, cam_h, fovy, fx, fy, cam_w / 2.0, cam_h / 2.0,
+            self.width, self.height,
+        )
 
     @property
     def ok(self) -> bool:
