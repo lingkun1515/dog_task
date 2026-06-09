@@ -2,6 +2,10 @@
 
 Go2 / Mower 底盘 + D1 / Piper 机械臂的移动抓取任务系统。提供**调度后台 → 执行侧服务**两层架构，支持**仿真（MuJoCo）与实机任务演示**。
 
+- 调度后台集成自 https://github.com/topsun-bot/Mower
+- 机械臂检测与抓取集成自 https://github.com/topsun-bot/pick_up_trash
+- Go2 运控 RL policy 集成自 https://github.com/zzzJie-Robot/LeggedManip_Lab
+
 ## 快速开始
 
 ### 1. 启动仿真执行服务
@@ -30,6 +34,19 @@ curl http://localhost:8100/api/navigate/status
 curl -X POST http://localhost:8100/api/grasp
 curl http://localhost:8100/api/detect
 curl http://localhost:8100/api/state
+```
+
+### 4. 辅助工具
+
+```bash
+# 仿真标定（从 MJCF 真值计算 T_cam_to_arm）
+python -m utils.calibrate_sim --config sim_go2_d1
+
+# 实机标定（ArUco 手眼标定）
+python -m utils.calibrate --arm-host 192.168.123.100
+
+# 端到端接口测试
+python -m utils.test_pipeline --url http://localhost:8100
 ```
 
 ## 配置说明
@@ -156,13 +173,15 @@ DogTaskSim/
 │   ├── grasp/                # GraspPlanner + ArmExecutor
 │   └── navigation/           # NavigationController
 ├── assets/                   # MJCF 模型 + RL policy
-├── utils/                    # 通用工具
-│   └── logging.py            # 统一日志配置
-├── logs/                     # 运行日志
-│   ├── execution.log         # 执行侧日志
-│   ├── scheduler.log         # 调度侧日志
-│   └── runs/                 # 任务 JSONL 记录
-└── scripts/                  # 辅助脚本
+├── utils/                    # 工具 + 辅助脚本
+│   ├── logging.py            # 统一日志配置
+│   ├── calibrate_sim.py      # 仿真标定
+│   ├── calibrate.py          # 实机 ArUco 标定
+│   └── test_pipeline.py      # 端到端接口测试
+└── logs/                     # 运行日志
+    ├── execution.log
+    ├── scheduler.log
+    └── runs/                 # 任务 JSONL 记录
 ```
 
 ## 日志
@@ -175,8 +194,15 @@ DogTaskSim/
 ## 任务流程
 
 ```
-派发 → GO_TO_LOCATION (导航) → PICK_AND_PUT (检测+抓取) → GO_DOCKING (返航) → FINISHED
+派发 → GO_TO_LOCATION (导航+检测) → PICK_AND_PUT (抓取) → GO_DOCKING (返航+对齐) → FINISHED
 ```
+
+## TODO
+
+- [ ] 调试仿真实现同现实完全对齐的抓取流程，减少 sim2real gap
+- [ ] 集成宇树官方 MuJoCo 仿真运控（替代当前第三方 RL policy）
+- [ ] 定位支持外部输入、导航 stack 支持外部服务（如 nav2）
+- [ ] 更新算法模块（感知、IK、抓取策略）
 
 ## 运行环境
 

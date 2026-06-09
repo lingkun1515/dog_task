@@ -101,7 +101,13 @@
       <geom size="0.05 0.045" pos="0.285 0 0.01" type="cylinder" class="collision" />
       <geom size="0.047" pos="0.293 0 -0.06" class="collision" />
       <site name="imu" pos="0 0 0.01" />
-      <camera name="front_cam" pos="0.32 0 0.0" xyaxes="0 -1 0 0.1736 0 0.9848" fovy="65" />
+      <!--  8°俯角: xyaxes="0 -1 0 0.1392 0 0.9903" -->
+      <!-- 10°俯角: xyaxes="0 -1 0 0.1736 0 0.9848" -->
+      <!-- 12°俯角: xyaxes="0 -1 0 0.2079 0 0.9781" -->
+      <!-- 15°俯角: xyaxes="0 -1 0 0.2588 0 0.9659" -->
+      <!-- 20°俯角: xyaxes="0 -1 0 0.3420 0 0.9397" -->
+      <!-- 30°俯角: xyaxes="0 -1 0 0.5000 0 0.8660" -->
+      <camera name="front_cam" pos="0.325 0 0.0" xyaxes="0 -1 0 0.3420 0 0.9397" fovy="65" />
 
       <!-- ===== Go2 Legs (FL, FR, RL, RR) ===== -->
       <body name="FL_hip" pos="0.1934 0.0465 0">

@@ -48,7 +48,7 @@
     <body name="target_marker" pos="12 0 0.005">
       <geom name="cross_h" type="box" pos="0 0 0" size="0.3 0.05 0.005" rgba="0.9 0.1 0.1 1"/>
       <geom name="cross_v" type="box" pos="0 0 0" size="0.05 0.3 0.005" rgba="0.9 0.1 0.1 1"/>
-      <geom name="target_pole" type="cylinder" pos="0.3 0 0.3" size="0.03 0.3" rgba="0.9 0.15 0.1 1"/>
+      <!-- <geom name="target_pole" type="cylinder" pos="0.3 0 0.3" size="0.03 0.3" rgba="0.9 0.15 0.1 1"/> -->
     </body>
 
     <body name="cone_1" pos="1.5 -9.2 0.02">
