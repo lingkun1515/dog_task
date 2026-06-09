@@ -369,8 +369,8 @@ INDEX_HTML = """<!DOCTYPE html>
         close: '关闭',
         logEmpty: '暂无日志，派发任务后将在此显示运行输出',
         scenes: {
-          sim_grasp_demo: '仿真抓取演示 (Go2+Piper)',
-          real_lawn_debris: '草坪异物清理（预留）',
+          lawn_debris: '草坪异物清理',
+          golf_ball: '高尔夫球回收（预留）',
           rain_inspect: '雨后场地巡检（预留）',
           material_drop: '养护物料投放（预留）',
         },
@@ -433,8 +433,8 @@ INDEX_HTML = """<!DOCTYPE html>
         close: 'Close',
         logEmpty: 'No logs yet. Output appears here after dispatch.',
         scenes: {
-          sim_grasp_demo: 'Simulation Grasp Demo (Go2+Piper)',
-          real_lawn_debris: 'Lawn debris cleanup (reserved)',
+          lawn_debris: 'Lawn debris cleanup',
+          golf_ball: 'Golf ball recovery (reserved)',
           rain_inspect: 'Post-rain inspection (reserved)',
           material_drop: 'Material drop (reserved)',
         },
@@ -480,8 +480,8 @@ INDEX_HTML = """<!DOCTYPE html>
     };
 
     const SCENE_OPTIONS = [
-      { value: 'sim_grasp_demo', disabled: false },
-      { value: 'real_lawn_debris', disabled: true },
+      { value: 'lawn_debris', disabled: false },
+      { value: 'golf_ball', disabled: true },
       { value: 'rain_inspect', disabled: true },
       { value: 'material_drop', disabled: true },
     ];
@@ -531,14 +531,14 @@ INDEX_HTML = """<!DOCTYPE html>
         if (pack[key] !== undefined) el.alt = pack[key];
       });
       logBox.style.setProperty('--log-empty-hint', JSON.stringify(pack.logEmpty));
-      const prev = sceneSelect.value || 'sim_grasp_demo';
+      const prev = sceneSelect.value || 'lawn_debris';
       sceneSelect.innerHTML = SCENE_OPTIONS.map((o) =>
         '<option value="' + o.value + '"' + (o.disabled ? ' disabled' : '')
         + (o.value === prev ? ' selected' : '') + '>'
         + pack.scenes[o.value] + '</option>'
       ).join('');
       sceneSelect.value = prev;
-      if (!sceneSelect.value) sceneSelect.value = 'sim_grasp_demo';
+      if (!sceneSelect.value) sceneSelect.value = 'lawn_debris';
       setLogVisible(logPanel.classList.contains('show'));
       renderTimeline();
     }
@@ -633,7 +633,7 @@ INDEX_HTML = """<!DOCTYPE html>
     }
 
     function sceneLabel(value) {
-      return (I18N[lang].scenes[value] || I18N.zh.scenes.sim_grasp_demo);
+      return (I18N[lang].scenes[value] || I18N.zh.scenes.lawn_debris);
     }
 
     function showResult(ok) {

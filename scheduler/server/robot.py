@@ -7,7 +7,7 @@ import os
 
 from ..config import RobotConfig, load_robot_config
 
-DEFAULT_ROBOT_ID = "sim_go2_piper"
+DEFAULT_ROBOT_ID = "sim_go2_d1"
 
 
 def get_robot_id() -> str:

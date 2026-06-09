@@ -184,12 +184,14 @@ class SimRGBDCamera:
             return self._latest_frame
 
     def set_rgb_frame(self, rgb: np.ndarray) -> None:
-        """Replace the stored frame with an annotated RGB array."""
+        """Replace the stored JPEG frame with an annotated RGB (for video stream only).
+
+        注意：不覆盖 _latest_rgb，避免检测器拿到标注过的图产生反馈环。
+        """
         jpeg = self._encode_jpeg(rgb)
         if jpeg is None:
             return
         with self._lock:
-            self._latest_rgb = rgb
             self._latest_frame = jpeg
 
     @staticmethod

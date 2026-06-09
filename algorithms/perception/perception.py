@@ -385,20 +385,57 @@ class SimObjectDetector(ObjectDetector):
             return []
 
     def _detect_hsv(self) -> list[Detection]:
-        if self._hsv_detector is None:
-            labels = [cfg["label"] for cfg in self._target_colors]
-            self._hsv_detector = HSVDetector(
-                camera=self._camera,
-                targets=labels,
-                color_order="rgb",  # Sim 渲染输出是 RGB
-            )
-        return self._hsv_detector.detect()
+        """HSV 颜色检测（使用 _target_colors 配置，直接内联而非委托 HSVDetector）。"""
+        rgb = self._camera.get_rgb()
+        if rgb is None:
+            return []
+        depth_m = self._camera.get_depth()
+
+        hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+        results = []
+
+        for cfg in self._target_colors:
+            lower = np.array(cfg["lower"], dtype=np.uint8)
+            upper = np.array(cfg["upper"], dtype=np.uint8)
+            label = cfg["label"]
+
+            mask = cv2.inRange(hsv, lower, upper)
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for c in contours:
+                area = cv2.contourArea(c)
+                if area < 100 or area > 50000:
+                    continue
+                x, y, w, h = cv2.boundingRect(c)
+                cx, cy = x + w // 2, y + h // 2
+
+                d = depth_at_pixel(depth_m, cx, cy) if depth_m is not None else None
+                if d is None or d > 2.0:
+                    continue
+
+                p3d = deproject_pixel(cx, cy, d, self._intrinsics)
+                results.append(Detection(
+                    label=label,
+                    center_pixel=(cx, cy),
+                    bbox=(x, y, w, h),
+                    depth_m=d,
+                    position_cam=np.array(p3d),
+                    confidence=0.85,
+                ))
+
+        return results
 
     # ------------------------------------------------------------------
     # 图像标注（用于相机推流）
     # ------------------------------------------------------------------
     def annotate_frame(self, rgb: np.ndarray) -> np.ndarray:
-        """在 RGB 图像上绘制检测框（使用完整 detect 管线的缓存结果）。"""
+        """在 RGB 图像上绘制检测框（使用完整 detect 管线的缓存结果）。
+
+        没有检测结果时直接返回原图，不画任何标注。
+        """
         import time
 
         import cv2
@@ -409,7 +446,11 @@ class SimObjectDetector(ObjectDetector):
                 self._cached_detections = self.detect()
             except Exception as e:
                 logger.error("[annotate] detect 异常: %s", e)
+                self._cached_detections = []
             self._cache_time = now
+
+        if not self._cached_detections:
+            return rgb
 
         annotated = rgb.copy()
         img_h, img_w = annotated.shape[:2]
@@ -417,14 +458,18 @@ class SimObjectDetector(ObjectDetector):
         for det in self._cached_detections:
             x, y, w, h = det.bbox
             cx, cy = det.center_pixel
+
+            if not (0 <= cx < img_w and 0 <= cy < img_h):
+                logger.debug("[annotate] %s pixel=(%d,%d) 超出图像边界，跳过绘制", det.label, cx, cy)
+                continue
+
             depth_label = f"{det.depth_m:.2f}m" if det.depth_m > 0 else "?m"
             conf_label = f"{det.confidence:.0%}" if det.confidence < 1.0 else ""
             label_text = f"{det.label} {depth_label} {conf_label}".strip()
 
-            in_bounds = (0 <= cx < img_w and 0 <= cy < img_h)
-            logger.info(
-                "[annotate] %s pixel=(%d,%d) bbox=(%d,%d,%d,%d) img=%dx%d in_bounds=%s depth=%.3fm",
-                det.label, cx, cy, x, y, w, h, img_w, img_h, in_bounds, det.depth_m,
+            logger.debug(
+                "[annotate] %s pixel=(%d,%d) bbox=(%d,%d,%d,%d) depth=%.3fm",
+                det.label, cx, cy, x, y, w, h, det.depth_m,
             )
 
             color = _COLORS.get(det.label, (0, 255, 0))
@@ -441,37 +486,46 @@ class SimObjectDetector(ObjectDetector):
     # 兜底：xpos 直读（MuJoCo 真值）
     # ------------------------------------------------------------------
     def _detect_from_xpos(self) -> list[Detection]:
-        """兜底：直接从 MuJoCo xpos 读取目标位置（上帝视角）。"""
+        """兜底：直接从 MuJoCo xpos 读取目标位置（上帝视角）。
+
+        只返回在相机视野内的目标（depth>0 且 pixel 在图像内）。
+        """
+        img_w = self._intrinsics.get("width", 640)
+        img_h = self._intrinsics.get("height", 480)
+        fx = self._intrinsics["fx"]
+        fy = self._intrinsics["fy"]
+        cxi = self._intrinsics["cx"]
+        cyi = self._intrinsics["cy"]
+
         detections = []
         for bid, label in zip(self._target_body_ids, self._target_labels):
             world_pos = self._data.xpos[bid].copy()
             pos_cam = self._world_to_cam(world_pos)
-            depth = float(pos_cam[2]) if pos_cam is not None else 0.0
+            depth = float(pos_cam[2])
 
-            if pos_cam is not None:
-                fx = self._intrinsics["fx"]
-                fy = self._intrinsics["fy"]
-                cxi = self._intrinsics["cx"]
-                cyi = self._intrinsics["cy"]
-                z = max(pos_cam[2], 0.001)
-                px = int(fx * pos_cam[0] / z + cxi)
-                py = int(fy * pos_cam[1] / z + cyi)
-                logger.debug(
-                    "[xpos] %s world=(%.3f,%.3f,%.3f) cam_cv=(%.3f,%.3f,%.3f) "
-                    "intrinsics(fx=%.1f,fy=%.1f,cx=%.1f,cy=%.1f) → pixel=(%d,%d)",
-                    label, world_pos[0], world_pos[1], world_pos[2],
-                    pos_cam[0], pos_cam[1], pos_cam[2],
-                    fx, fy, cxi, cyi, px, py,
-                )
-            else:
-                px, py = 0, 0
-                logger.warning("[xpos] %s world=(%.3f,%.3f,%.3f) → cam 转换失败",
-                               label, world_pos[0], world_pos[1], world_pos[2])
+            if depth <= 0.01:
+                logger.debug("[xpos] %s 在相机后方 (depth=%.3f)，跳过", label, depth)
+                continue
 
+            px = int(fx * pos_cam[0] / depth + cxi)
+            py = int(fy * pos_cam[1] / depth + cyi)
+
+            if not (0 <= px < img_w and 0 <= py < img_h):
+                logger.debug("[xpos] %s pixel=(%d,%d) 超出图像 %dx%d，跳过",
+                             label, px, py, img_w, img_h)
+                continue
+
+            logger.debug(
+                "[xpos] %s world=(%.3f,%.3f,%.3f) cam_cv=(%.3f,%.3f,%.3f) → pixel=(%d,%d) depth=%.3fm",
+                label, world_pos[0], world_pos[1], world_pos[2],
+                pos_cam[0], pos_cam[1], pos_cam[2], px, py, depth,
+            )
+
+            bbox_half = max(10, int(20 / depth))
             detections.append(Detection(
                 label=label,
                 center_pixel=(px, py),
-                bbox=(px - 10, py - 10, 20, 20),
+                bbox=(px - bbox_half, py - bbox_half, bbox_half * 2, bbox_half * 2),
                 depth_m=depth,
                 position_cam=pos_cam,
                 confidence=1.0,

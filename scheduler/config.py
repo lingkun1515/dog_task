@@ -17,7 +17,11 @@ DEFAULT_EXECUTION_PORT = 8100
 
 @dataclass(frozen=True)
 class RobotConfig:
-    """机器人连接配置，由 config/robots/<编号>.toml 加载。"""
+    """机器人连接配置，由 config/robots/<编号>.toml 加载。
+
+    Sim/Real 统一配置文件；scheduler 只读取自身需要的字段，
+    execution 侧同样从该文件读取仿真/硬件参数。
+    """
 
     robot_id: str
     mode: str = "real"          # "real" | "sim"
@@ -27,25 +31,16 @@ class RobotConfig:
     grasp_port: int = DEFAULT_GRASP_PORT
     grasp_path: str = DEFAULT_GRASP_PATH
     execution_url: str = ""     # 仿真/执行侧 HTTP 服务地址
-    target_x: float = 5.0       # 目标点 X（仿真导航用）
+    target_x: float = 5.0       # 目标点 X
     target_y: float = 0.0       # 目标点 Y
     home_x: float = 0.0         # 回程目标 X（充电桩/原点）
     home_y: float = -10.0       # 回程目标 Y
-    arrival_threshold: float = 0.5  # 导航到达判定距离（需 ≤ 机械臂作业范围）
+    arrival_threshold: float = 0.5  # 导航到达判定距离
 
-    # 机械臂类型（sim: piper/d1, real: d1）
-    arm_type: str = ""
-    # 实机 D1 机械臂网络地址
+    # 实机专用
     arm_host: str = ""
     arm_port: int = 8088
-    # 实机标定文件路径
     calibration_path: str = ""
-    # 仿真 MJCF body 名称
-    tcp_body: str = ""
-    arm_base_body: str = ""
-    # 目标物体
-    target_bodies: str = ""   # 逗号分隔
-    target_labels: str = ""   # 逗号分隔
     target_classes: str = ""  # YOLO 检测类别（逗号分隔）
 
     @property
@@ -62,19 +57,16 @@ class RobotConfig:
         return f"{url}?detect=1" if detect else url
 
     def navigate_url(self) -> str:
-        """导航接口地址。"""
         if self.mode == "sim":
             return f"{self.execution_url}/api/navigate"
         return ""
 
     def navigate_status_url(self) -> str:
-        """导航状态查询地址。"""
         if self.mode == "sim":
             return f"{self.execution_url}/api/navigate/status"
         return ""
 
     def grasp_status_url(self) -> str:
-        """抓取状态查询地址。"""
         if self.mode == "sim":
             return f"{self.execution_url}/api/grasp/status"
         return ""
@@ -86,9 +78,14 @@ def robots_config_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "config" / "robots"
 
 
+def robot_config_path(robot_id: str) -> Path:
+    """返回 robot_id 对应的 TOML 配置文件路径。"""
+    return robots_config_dir() / f"{robot_id}.toml"
+
+
 def load_robot_config(robot_id: str) -> RobotConfig:
     """根据机器编号加载 config/robots/<robot_id>.toml。"""
-    config_path = robots_config_dir() / f"{robot_id}.toml"
+    config_path = robot_config_path(robot_id)
     if not config_path.is_file():
         raise FileNotFoundError(f"未找到机器人配置: {config_path}")
 
@@ -96,16 +93,6 @@ def load_robot_config(robot_id: str) -> RobotConfig:
         data = tomllib.load(config_file)
 
     mode = str(data.get("mode", "real"))
-
-    arm_type = str(data.get("arm_type", ""))
-    arm_host = str(data.get("arm_host", ""))
-    arm_port = int(data.get("arm_port", 8088))
-    calibration_path = str(data.get("calibration_path", ""))
-    tcp_body = str(data.get("tcp_body", ""))
-    arm_base_body = str(data.get("arm_base_body", ""))
-    target_bodies = str(data.get("target_bodies", ""))
-    target_labels = str(data.get("target_labels", ""))
-    target_classes = str(data.get("target_classes", ""))
 
     if mode == "sim":
         execution_url = data.get("execution_url")
@@ -120,11 +107,6 @@ def load_robot_config(robot_id: str) -> RobotConfig:
             home_x=float(data.get("home_x", 0.0)),
             home_y=float(data.get("home_y", -10.0)),
             arrival_threshold=float(data.get("arrival_threshold", 0.5)),
-            arm_type=arm_type,
-            tcp_body=tcp_body,
-            arm_base_body=arm_base_body,
-            target_bodies=target_bodies,
-            target_labels=target_labels,
         )
 
     host = data.get("host")
@@ -140,9 +122,8 @@ def load_robot_config(robot_id: str) -> RobotConfig:
         port=int(data.get("port", DEFAULT_ROBOT_PORT)),
         grasp_port=int(data.get("grasp_port", DEFAULT_GRASP_PORT)),
         grasp_path=str(data.get("grasp_path", DEFAULT_GRASP_PATH)),
-        arm_type=arm_type,
-        arm_host=arm_host,
-        arm_port=arm_port,
-        calibration_path=calibration_path,
-        target_classes=target_classes,
+        arm_host=str(data.get("arm_host", "")),
+        arm_port=int(data.get("arm_port", 8088)),
+        calibration_path=str(data.get("calibration_path", "")),
+        target_classes=str(data.get("target_classes", "")),
     )

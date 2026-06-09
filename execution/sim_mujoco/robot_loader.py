@@ -10,17 +10,30 @@ os.environ.setdefault("MUJOCO_GL", "egl")
 
 import mujoco
 import numpy as np
-import yaml
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 def load_config(config_path: str | None = None) -> dict:
-    """Load simulation config from YAML file."""
+    """Load simulation config from TOML (preferred) or YAML (legacy)."""
     if config_path is None:
-        config_path = str(Path(__file__).parent / "config.yaml")
-    with open(config_path) as f:
-        return yaml.safe_load(f)
+        config_path = str(_PROJECT_ROOT / "config" / "robots" / "sim_go2_piper.toml")
+
+    path = Path(config_path)
+    if not path.is_absolute():
+        path = _PROJECT_ROOT / path
+
+    if path.suffix == ".toml":
+        try:
+            import tomllib
+        except ModuleNotFoundError:
+            import tomli as tomllib
+        with open(path, "rb") as f:
+            return tomllib.load(f)
+    else:
+        import yaml
+        with open(path) as f:
+            return yaml.safe_load(f)
 
 
 def resolve_path(relative_path: str) -> str:

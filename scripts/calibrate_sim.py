@@ -5,7 +5,7 @@
 不需要启动仿真窗口，仅加载模型静态数据。
 
 用法:
-    python scripts/calibrate_sim.py [--config execution/sim_mujoco/config_d1.yaml]
+    python scripts/calibrate_sim.py [--config sim_go2_d1]
 
 输出:
     algorithms/calibration/output/sim_calibration_result.json
@@ -23,17 +23,20 @@ def main():
     parser = argparse.ArgumentParser(description="仿真手眼标定 (从 MJCF 真值)")
     parser.add_argument(
         "--config",
-        default="execution/sim_mujoco/config_d1.yaml",
-        help="仿真配置文件路径",
+        default="sim_go2_d1",
+        help="Robot config: robot_id (e.g. sim_go2_d1) or .toml path",
     )
     args = parser.parse_args()
 
-    import yaml
     import mujoco
 
-    config_path = _PROJECT_ROOT / args.config
-    with open(config_path) as f:
-        cfg = yaml.safe_load(f)
+    from execution.sim_mujoco.robot_loader import load_config
+
+    config_path = args.config
+    p = Path(config_path)
+    if not p.suffix:
+        config_path = str(_PROJECT_ROOT / "config" / "robots" / f"{config_path}.toml")
+    cfg = load_config(config_path)
 
     xml_path = str(_PROJECT_ROOT / cfg["xml_path"])
     algo_cfg = cfg.get("algorithms", {})

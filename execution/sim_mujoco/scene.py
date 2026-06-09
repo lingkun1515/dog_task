@@ -34,6 +34,7 @@ class SimulationScene:
         self.robot = RobotSim(config_path)
         cfg = self.robot.cfg
         self._render_mode = render_mode
+        self._arm_rl_enabled = cfg.get("arm_rl_enabled", True)
 
         default_angles = cfg.get("default_angles", self.robot.default_angles.tolist())
 
@@ -322,6 +323,9 @@ class SimulationScene:
                         pos_command=pos_cmd,
                     )
                     self.robot._target_dof_pos = target_dof
+                    # RL 不控制手臂时，强制保持默认收缩姿态
+                    if not self._arm_rl_enabled:
+                        self.robot._target_dof_pos[12:18] = self.robot.default_angles[12:18]
                     if not self._arm_rl_enabled:
                         self.robot._target_dof_pos[12:18] = self.robot.default_angles[12:18]
                 else:
@@ -386,7 +390,8 @@ class SimulationScene:
         if self._algo_running:
             logger.warning("算法抓取已在运行中 — 忽略重复请求")
             return
-        logger.info("启动算法抓取")
+        logger.info("启动算法抓取 — 立即停止导航")
+        self.nav.cancel()
         self._algo_running = True
 
         def _run():

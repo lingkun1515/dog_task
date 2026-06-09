@@ -1,9 +1,9 @@
 """Sim 端 FastAPI 执行服务（MuJoCo 仿真）。
 
 启动:
-    python -m execution.sim_mujoco.sim_task_server
-    python -m execution.sim_mujoco.sim_task_server --port 8100
-    python -m execution.sim_mujoco.sim_task_server --render   # 桌面 GUI 窗口
+    python -m execution.sim_mujoco.sim_task_server --config sim_go2_piper
+    python -m execution.sim_mujoco.sim_task_server --config sim_go2_d1 --render
+    python -m execution.sim_mujoco.sim_task_server --config config/robots/sim_go2_d1.toml
 """
 
 from __future__ import annotations
@@ -22,10 +22,27 @@ from typing import Any
 # When launched as __main__ we parse CLI args and forward settings via env
 # vars so that uvicorn's re-import sees the same configuration.
 # ---------------------------------------------------------------------------
+def _resolve_config_path(config_arg: str) -> str:
+    """将 --config 参数解析为完整路径。支持 robot_id 或文件路径。"""
+    p = Path(config_arg)
+    if p.suffix == ".toml" and p.exists():
+        return str(p.resolve())
+    # 作为 robot_id 处理
+    project_root = Path(__file__).resolve().parent.parent.parent
+    candidate = project_root / "config" / "robots" / f"{config_arg}.toml"
+    if candidate.exists():
+        return str(candidate)
+    return config_arg
+
+
 def _parse_args():
     parser = argparse.ArgumentParser(description="DogTask MuJoCo simulation server")
     parser.add_argument("--host", default="0.0.0.0", help="Bind host")
     parser.add_argument("--port", type=int, default=8100, help="Bind port")
+    parser.add_argument(
+        "--config", default="sim_go2_piper",
+        help="Robot config: robot_id (e.g. sim_go2_d1) or .toml path",
+    )
     parser.add_argument(
         "--render", action="store_true",
         help="Enable desktop visualisation window (default: headless EGL)",
@@ -37,12 +54,14 @@ if __name__ == "__main__":
     os.environ["DTS_RENDER"] = "1" if _args.render else "0"
     os.environ["DTS_HOST"] = _args.host
     os.environ["DTS_PORT"] = str(_args.port)
+    os.environ["DTS_CONFIG"] = _resolve_config_path(_args.config)
 else:
     # Re-import by uvicorn — read settings from env vars
     _args = argparse.Namespace(
         render=os.environ.get("DTS_RENDER", "0") == "1",
         host=os.environ.get("DTS_HOST", "0.0.0.0"),
         port=int(os.environ.get("DTS_PORT", "8100")),
+        config=os.environ.get("DTS_CONFIG", ""),
     )
 
 if not _args.render:
@@ -89,7 +108,7 @@ async def lifespan(app: FastAPI):
     # In GUI mode the scene is pre-created in main() so GLFW stays on the
     # main thread; in headless mode we create it here.
     if _scene is None:
-        config_path = os.environ.get("SIM_CONFIG", None)
+        config_path = os.environ.get("DTS_CONFIG") or None
         _scene = SimulationScene(config_path, render_mode="headless")
         _scene.start()
     yield
@@ -298,9 +317,8 @@ def main():
         # GUI mode: GLFW needs the main thread, so the simulation loop runs
         # here and uvicorn runs in a daemon thread.
         global _scene
-        _scene = SimulationScene(
-            os.environ.get("SIM_CONFIG"), render_mode="gui"
-        )
+        config_path = os.environ.get("DTS_CONFIG") or None
+        _scene = SimulationScene(config_path, render_mode="gui")
         _scene.enable_keyboard()
 
         def _serve():
