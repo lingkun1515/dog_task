@@ -1,15 +1,12 @@
 # DogTaskSim — 机器人移动抓取任务调度与仿真系统
 
-Go2 四足底盘 + Piper/D1 机械臂的移动抓取任务系统。提供**调度后台 → 执行侧服务**两层架构，支持**仿真（MuJoCo）与实机统一调度**。
+Go2 / Mower 底盘 + D1 / Piper 机械臂的移动抓取任务系统。提供**调度后台 → 执行侧服务**两层架构，支持**仿真（MuJoCo）与实机任务演示**。
 
 ## 快速开始
 
 ### 1. 启动仿真执行服务
 
 ```bash
-# Go2 + Piper (默认)
-python -m execution.sim_mujoco.sim_task_server --config sim_go2_piper --render
-
 # Go2 + D1
 python -m execution.sim_mujoco.sim_task_server --config sim_go2_d1 --render
 
@@ -53,51 +50,60 @@ mode = "sim"
 execution_url = "http://localhost:8100"
 
 # 调度参数
-target_x = 12.0
+target_x = 12.0             # 导航目标点
 target_y = 0.0
-home_x = 0.0
+home_x = 0.0                # 回程点（充电桩）
 home_y = -10.0
-arrival_threshold = 1.0
+arrival_threshold = 0.45    # 到达判定距离(m)，需 ≤ 机械臂最大可达
 
 # 仿真参数
 xml_path = "assets/go2_d1/scene.xml"
 simulation_dt = 0.005
 control_decimation = 4
-kps = [35.0, ...]
-kds = [0.8, ...]
-default_angles = [0.1, 0.8, -1.5, ...]
-arm_rl_enabled = false    # true=RL控制手臂, false=手臂保持收缩
+default_angles = [...]      # 18 DOF 默认关节角(rad)
+arm_rl_enabled = false      # false=手臂保持收缩, true=RL控制手臂
 
 # 算法抓取
 [algorithms]
 arm_kinematics = "d1"
 arm_base_body = "d1_base_link"
-target_bodies = ["target_sphere"]
-target_labels = ["ball"]
+target_bodies = ["target_sphere"]   # MuJoCo body 名称
+target_labels = ["sphere"]          # 检测标签（显示在视频帧上）
+approach_height = 0.12
+move_wait = 0.6                     # 仿真中每步运动等待(秒)
+gripper_wait = 0.2                  # 夹爪动作等待(秒)
+safe_park_angles = [0.0, 30.0, -10.0, 0.0, 0.0, 0.0]
 ```
 
 ### Real 配置示例 (real_mower_d1.toml)
 
 ```toml
 mode = "real"
-host = "10.10.170.239"
-orin = "10.10.170.191"
+host = "10.10.170.239"      # 底盘 TCP
+orin = "10.10.170.191"      # Orin (视频流/抓取服务)
 port = 9002
 grasp_port = 5000
-grasp_path = "/grasp"
 arm_host = "192.168.123.100"
 arm_port = 8088
-target_classes = "bottle"
+calibration_path = "output/calibration_result.json"
+
+[algorithms]
+arm_kinematics = "d1"
+target_classes = ["bottle"]         # YOLO 检测类别
+approach_height = 0.10
+descend_step = 0.03
+safe_park_angles = [0.0, 30.0, -10.0, 0.0, 0.0, 0.0]
 ```
 
 ### 关键参数
 
 | 参数 | 说明 |
 |------|------|
-| `arm_rl_enabled` | `false`=手臂保持收缩(default_angles[12:18])，抓取时由GraspPlanner接管 |
-| `[algorithms].target_labels` | 检测标签，决定视频流叠加的标注文字 |
-| `[algorithms].arm_kinematics` | `"d1"` 或 `"mujoco"`，选择 IK 算法 |
-| `arrival_threshold` | 导航到达判定距离(m)，需 ≤ 机械臂作业范围 |
+| `arrival_threshold` | 导航到达判定距离(m)，需 ≤ 机械臂最大可达距离 |
+| `arm_rl_enabled` | `false`=手臂保持 default_angles 收缩，抓取时由 GraspPlanner 接管 |
+| `[algorithms].target_labels` | 检测标签，影响视频流叠加标注文字和检测管道 |
+| `[algorithms].arm_kinematics` | `"d1"`=URDF 解析式 IK(sim2real对齐)，`"mujoco"`=数值 IK(通用) |
+| `[algorithms].move_wait` | 仿真机械臂每步运动等待时间，调小可加快抓取速度 |
 
 ## 环境变量
 
@@ -136,7 +142,7 @@ DogTaskSim/
 │   ├── sim_mujoco/           # MuJoCo 仿真
 │   │   ├── sim_task_server.py  # HTTP 服务入口
 │   │   ├── scene.py          # 仿真场景 + 控制循环
-│   │   ├── robot_loader.py   # 模型加载 + PD
+│   │   ├── robot_loader.py   # 模型加载 + PD 控制
 │   │   ├── policy_runner.py  # RL locomotion policy
 │   │   ├── grasp.py          # 开环抓取 (fallback)
 │   │   └── camera.py         # 离屏 RGB-D 相机

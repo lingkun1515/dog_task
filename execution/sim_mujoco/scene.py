@@ -42,7 +42,7 @@ class SimulationScene:
         self.nav = NavigationController(
             linear_speed=cfg.get("nav_linear_speed", 0.5),
             angular_speed=cfg.get("nav_angular_speed", 0.8),
-            arrival_threshold=cfg.get("nav_arrival_threshold", 0.5),
+            arrival_threshold=cfg.get("arrival_threshold", cfg.get("nav_arrival_threshold", 0.5)),
             heading_threshold=cfg.get("nav_heading_threshold", 0.1),
         )
 
@@ -155,6 +155,8 @@ class SimulationScene:
             gripper_open=algo_cfg.get("gripper_open", 65),
             gripper_close=algo_cfg.get("gripper_close", 0),
             safe_park=algo_cfg.get("safe_park_angles", [0.0, 1.0, -0.8, 0.0, -0.3, 0.0]),
+            move_wait=algo_cfg.get("move_wait", 2.0),
+            gripper_wait=algo_cfg.get("gripper_wait", 0.5),
         )
         self._algo_planner = GraspPlanner(
             kinematics=kinematics,
@@ -377,9 +379,9 @@ class SimulationScene:
     # ------------------------------------------------------------------
     # Command helpers (called from server endpoints)
     # ------------------------------------------------------------------
-    def navigate_to(self, x: float, y: float, require_heading: bool = True, arrival_threshold: float | None = None) -> None:
-        logger.info("导航目标设置: (%.2f, %.2f)", x, y)
-        self.nav.set_target(x, y, require_heading=require_heading, arrival_threshold=arrival_threshold)
+    def navigate_to(self, x: float, y: float, require_heading: bool = False, goal_heading: float | None = None, arrival_threshold: float | None = None) -> None:
+        logger.info("导航目标设置: (%.2f, %.2f) heading=%s", x, y, goal_heading)
+        self.nav.set_target(x, y, require_heading=require_heading, goal_heading=goal_heading, arrival_threshold=arrival_threshold)
         self._refresh_snapshot()
 
     def cancel_navigation(self) -> None:

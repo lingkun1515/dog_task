@@ -41,7 +41,6 @@ class RobotConfig:
     arm_host: str = ""
     arm_port: int = 8088
     calibration_path: str = ""
-    target_classes: str = ""  # YOLO 检测类别（逗号分隔）
 
     @property
     def grasp_url(self) -> str:
@@ -125,5 +124,4 @@ def load_robot_config(robot_id: str) -> RobotConfig:
         arm_host=str(data.get("arm_host", "")),
         arm_port=int(data.get("arm_port", 8088)),
         calibration_path=str(data.get("calibration_path", "")),
-        target_classes=str(data.get("target_classes", "")),
     )

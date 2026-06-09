@@ -91,8 +91,8 @@ class SimRGBDCamera:
             fovy = float(self.model.cam_fovy[self._cam_id])
             res = self.model.cam_resolution[self._cam_id]
             cam_w, cam_h = int(res[0]), int(res[1])
-            # MJCF cam_resolution defaults to [0,0] when not specified
-            if cam_w <= 0 or cam_h <= 0:
+            # MuJoCo 对未指定 resolution 的相机默认返回 [1,1]，需要回退到实际渲染分辨率
+            if cam_w < self.width or cam_h < self.height:
                 cam_w, cam_h = self.width, self.height
         else:
             fovy = 65.0

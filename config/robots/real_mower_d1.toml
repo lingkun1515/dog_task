@@ -20,6 +20,15 @@ arm_port = 8088                # D1 机械臂 HTTP 端口
 calibration_path = "output/calibration_result.json"
 
 # ============================================================
-# 感知
+# 算法抓取配置（与 sim 统一结构）
 # ============================================================
-target_classes = "bottle"      # YOLO 检测目标类别（逗号分隔）
+[algorithms]
+arm_kinematics = "d1"
+target_classes = ["bottle"]        # YOLO 检测目标类别
+approach_height = 0.10
+descend_step = 0.03
+gripper_open = 65
+gripper_close = 0
+z_overshoot = 0.02
+lift_height = 0.15
+safe_park_angles = [0.0, 30.0, -10.0, 0.0, 0.0, 0.0]

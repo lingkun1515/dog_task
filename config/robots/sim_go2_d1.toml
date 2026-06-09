@@ -11,7 +11,7 @@ target_x = 12.0
 target_y = 0.0
 home_x = 0.0
 home_y = -10.0
-arrival_threshold = 1.0
+arrival_threshold = 0.6
 
 # ============================================================
 # 仿真参数（execution 使用）
@@ -49,7 +49,6 @@ arm_rl_enabled = false
 # Navigation
 nav_linear_speed = 0.5
 nav_angular_speed = 0.8
-nav_arrival_threshold = 0.45
 nav_heading_threshold = 0.1
 
 # D1 arm grasp pose (open-loop fallback)
@@ -80,3 +79,5 @@ descend_step = 0.015
 gripper_open = 65
 gripper_close = 0
 safe_park_angles = [0.0, 30.0, -10.0, 0.0, 0.0, 0.0]
+move_wait = 0.6
+gripper_wait = 0.2

@@ -79,3 +79,5 @@ approach_height = 0.12
 gripper_open = 65
 gripper_close = 0
 safe_park_angles = [0.0, 1.0, -0.8, 0.0, -0.3, 0.0]
+move_wait = 0.6
+gripper_wait = 0.2

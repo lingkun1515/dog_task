@@ -141,17 +141,21 @@ def health() -> dict[str, str]:
 def navigate(body: dict[str, Any]) -> dict[str, Any]:
     """Start navigation to a target position.
 
-    Body: {"x": float, "y": float, "require_heading": bool, "arrival_threshold": float}
+    Body: {"x": float, "y": float, "require_heading": bool, "goal_heading": float|null, "arrival_threshold": float}
     """
     scene = get_scene()
     x = float(body.get("x", 0))
     y = float(body.get("y", 0))
-    require_heading = bool(body.get("require_heading", True))
+    require_heading = bool(body.get("require_heading", False))
+    goal_heading = body.get("goal_heading", None)
+    if goal_heading is not None:
+        goal_heading = float(goal_heading)
     arrival_threshold = body.get("arrival_threshold", None)
     if arrival_threshold is not None:
         arrival_threshold = float(arrival_threshold)
-    logger.info("导航请求: target=(%.2f, %.2f) require_heading=%s threshold=%s", x, y, require_heading, arrival_threshold)
-    scene.navigate_to(x, y, require_heading=require_heading, arrival_threshold=arrival_threshold)
+    logger.info("导航请求: target=(%.2f, %.2f) require_heading=%s goal_heading=%s threshold=%s",
+                x, y, require_heading, goal_heading, arrival_threshold)
+    scene.navigate_to(x, y, require_heading=require_heading, goal_heading=goal_heading, arrival_threshold=arrival_threshold)
     return {"status": "accepted", "target": [x, y]}
 
 

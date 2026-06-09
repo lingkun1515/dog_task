@@ -303,10 +303,11 @@ class SimObjectDetector(ObjectDetector):
                 self._target_labels.append(self._labels[i] if i < len(self._labels) else name)
 
         # HSV 检测默认配置（红+黄，覆盖常见目标颜色）
+        _default_label = self._labels[0] if self._labels else "object"
         self._target_colors = target_colors or [
-            {"lower": (0, 100, 50), "upper": (10, 255, 255), "label": "ball"},
-            {"lower": (170, 100, 50), "upper": (180, 255, 255), "label": "ball"},
-            {"lower": (20, 80, 80), "upper": (30, 255, 255), "label": "ball"},  # 黄色
+            {"lower": (0, 100, 50), "upper": (10, 255, 255), "label": _default_label},
+            {"lower": (170, 100, 50), "upper": (180, 255, 255), "label": _default_label},
+            {"lower": (20, 80, 80), "upper": (30, 255, 255), "label": _default_label},
         ]
 
         # 统一的 YOLO / HSV 检测器（共用类）
@@ -347,27 +348,27 @@ class SimObjectDetector(ObjectDetector):
         # 2. HSV fallback
         dets = self._detect_hsv()
         if dets:
-            for d in dets:
-                logger.info("[detect/HSV] %s pixel=(%d,%d) bbox=(%d,%d,%d,%d) depth=%.3fm pos_cam=(%.3f,%.3f,%.3f)",
-                            d.label,
-                            d.center_pixel[0], d.center_pixel[1],
-                            d.bbox[0], d.bbox[1], d.bbox[2], d.bbox[3],
-                            d.depth_m,
-                            d.position_cam[0], d.position_cam[1], d.position_cam[2])
+            # for d in dets:
+            #     logger.info("[detect/HSV] %s pixel=(%d,%d) bbox=(%d,%d,%d,%d) depth=%.3fm pos_cam=(%.3f,%.3f,%.3f)",
+            #                 d.label,
+            #                 d.center_pixel[0], d.center_pixel[1],
+            #                 d.bbox[0], d.bbox[1], d.bbox[2], d.bbox[3],
+            #                 d.depth_m,
+            #                 d.position_cam[0], d.position_cam[1], d.position_cam[2])
             return dets
 
         # 3. xpos 兜底
         dets = self._detect_from_xpos()
-        if dets:
-            for d in dets:
-                logger.info("[detect/xpos] %s pixel=(%d,%d) bbox=(%d,%d,%d,%d) depth=%.3fm pos_cam=(%.3f,%.3f,%.3f)",
-                            d.label,
-                            d.center_pixel[0], d.center_pixel[1],
-                            d.bbox[0], d.bbox[1], d.bbox[2], d.bbox[3],
-                            d.depth_m,
-                            d.position_cam[0], d.position_cam[1], d.position_cam[2])
-        else:
-            logger.warning("[detect] 全部管线均未检测到目标")
+        # if dets:
+        #     for d in dets:
+        #         logger.info("[detect/xpos] %s pixel=(%d,%d) bbox=(%d,%d,%d,%d) depth=%.3fm pos_cam=(%.3f,%.3f,%.3f)",
+        #                     d.label,
+        #                     d.center_pixel[0], d.center_pixel[1],
+        #                     d.bbox[0], d.bbox[1], d.bbox[2], d.bbox[3],
+        #                     d.depth_m,
+        #                     d.position_cam[0], d.position_cam[1], d.position_cam[2])
+        # else:
+        #     logger.warning("[detect] 全部管线均未检测到目标")
         return dets
 
     def _detect_yolo(self) -> list[Detection]:

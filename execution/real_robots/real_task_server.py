@@ -30,8 +30,12 @@ setup_logging("execution", "logs/execution.log")
 
 import logging
 
-from algorithms.calibration import REAL_CALIB_FILE, load_calibration_file
-from algorithms.calibration.base import CalibrationResult
+from algorithms.calibration.real_calibration import load_calibration
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+
 
 logger = logging.getLogger(__name__)
 from algorithms.grasp.executor import RealArmExecutor
@@ -54,59 +58,58 @@ _camera: RealSenseCamera | None = None
 _planner: GraspPlanner | None = None
 _executor: RealArmExecutor | None = None
 _nav: NavigationController | None = None
-_yolo_classes: list[str] = ["bottle"]
-_arm_host: str = "192.168.123.100"
-_arm_port: int = 8088
+_cfg: dict = {}
 
-SAFE_PARK = [-90, 30, -10, 0, 0, 0, 0]
+
+def _load_robot_toml(config_path: str | None) -> dict:
+    """加载 TOML 配置文件。"""
+    if config_path is None:
+        config_path = str(_PROJECT_ROOT / "config" / "robots" / "real_mower_d1.toml")
+    p = Path(config_path)
+    if not p.suffix:
+        p = _PROJECT_ROOT / "config" / "robots" / f"{config_path}.toml"
+    with open(p, "rb") as f:
+        return tomllib.load(f)
 
 
 # ---------------------------------------------------------------------------
 # Initialization
 # ---------------------------------------------------------------------------
-def init_all(
-    classes: list[str] | None = None,
-    arm_host: str | None = None,
-    arm_port: int | None = None,
-):
-    global _camera, _planner, _executor, _nav, _yolo_classes, _arm_host, _arm_port
+def init_all(config_path: str | None = None):
+    global _camera, _planner, _executor, _nav, _cfg
 
-    if classes:
-        _yolo_classes = classes
-    if arm_host:
-        _arm_host = arm_host
-    if arm_port:
-        _arm_port = arm_port
+    _cfg = _load_robot_toml(config_path)
+    algo_cfg = _cfg.get("algorithms", {})
 
-    print(f"[real_task] 连接机械臂 {_arm_host}:{_arm_port}...", flush=True)
-    _executor = RealArmExecutor(host=_arm_host, port=_arm_port)
+    arm_host = _cfg.get("arm_host", "192.168.123.100")
+    arm_port = _cfg.get("arm_port", 8088)
+    yolo_classes = algo_cfg.get("target_classes", ["bottle"])
+    calib_path_cfg = _cfg.get("calibration_path", "output/calibration_result.json")
 
-    print("[real_task] 启动 D455...", flush=True)
+    logger.info("连接机械臂 %s:%d", arm_host, arm_port)
+    _executor = RealArmExecutor(host=arm_host, port=arm_port)
+
+    logger.info("启动 D455...")
     _camera = RealSenseCamera()
 
-    print(f"[real_task] 加载 YOLO ({_yolo_classes})...", flush=True)
-    detector = YOLODetector(_camera, classes=_yolo_classes, conf=0.3)
+    logger.info("加载 YOLO (%s)", yolo_classes)
+    detector = YOLODetector(_camera, classes=yolo_classes, conf=0.3)
 
-    print("[real_task] 加载标定...", flush=True)
-    calib_path = os.environ.get("CALIB_PATH", REAL_CALIB_FILE)
-    try:
-        calibration = load_calibration_file(calib_path)
-        print(f"  标定已加载: {calib_path} (method={calibration.method})", flush=True)
-    except FileNotFoundError:
-        logger.warning("标定文件不存在: %s — 使用几何估算 fallback", calib_path)
-        from algorithms.calibration.real_calibration import load_calibration
-        calibration = load_calibration(None)
+    logger.info("加载标定...")
+    calib_path = os.environ.get("CALIB_PATH", str(_PROJECT_ROOT / calib_path_cfg))
+    calibration = load_calibration(calib_path if os.path.exists(calib_path) else None)
 
     kinematics = D1Kinematics()
 
+    safe_park = algo_cfg.get("safe_park_angles", [0, 30, -10, 0, 0, 0])
     config = GraspConfig(
-        approach_height=0.10,
-        descend_step=0.03,
-        gripper_open=65,
-        gripper_close=0,
-        z_overshoot=0.02,
-        lift_height=0.15,
-        safe_park=SAFE_PARK,
+        approach_height=algo_cfg.get("approach_height", 0.10),
+        descend_step=algo_cfg.get("descend_step", 0.03),
+        gripper_open=algo_cfg.get("gripper_open", 65),
+        gripper_close=algo_cfg.get("gripper_close", 0),
+        z_overshoot=algo_cfg.get("z_overshoot", 0.02),
+        lift_height=algo_cfg.get("lift_height", 0.15),
+        safe_park=safe_park,
     )
 
     _planner = GraspPlanner(
@@ -170,11 +173,14 @@ def api_navigate(body: dict):
         return JSONResponse(status_code=503, content={"detail": "not_initialized"})
     x = float(body.get("x", 0))
     y = float(body.get("y", 0))
-    require_heading = bool(body.get("require_heading", True))
+    require_heading = bool(body.get("require_heading", False))
+    goal_heading = body.get("goal_heading", None)
+    if goal_heading is not None:
+        goal_heading = float(goal_heading)
     arrival_threshold = body.get("arrival_threshold", None)
     if arrival_threshold is not None:
         arrival_threshold = float(arrival_threshold)
-    _nav.set_target(x, y, require_heading=require_heading, arrival_threshold=arrival_threshold)
+    _nav.set_target(x, y, require_heading=require_heading, goal_heading=goal_heading, arrival_threshold=arrival_threshold)
     return {"status": "accepted", "target": [x, y]}
 
 
@@ -301,7 +307,8 @@ def api_reset():
         _state["busy"] = False
         _state["status"] = "idle"
     if _executor is not None:
-        _executor.move_to_joints(SAFE_PARK, mode=1, wait_time=2.0)
+        safe_park = _cfg.get("algorithms", {}).get("safe_park_angles", [0, 30, -10, 0, 0, 0])
+        _executor.move_to_joints(safe_park, mode=1, wait_time=2.0)
     return {"status": "reset"}
 
 
@@ -362,12 +369,13 @@ def main():
     parser = argparse.ArgumentParser(description="DogTask Real Executor")
     parser.add_argument("--port", type=int, default=5000)
     parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--classes", nargs="+", default=["bottle"])
-    parser.add_argument("--arm-host", default="192.168.123.100")
-    parser.add_argument("--arm-port", type=int, default=8088)
+    parser.add_argument(
+        "--config", default="real_mower_d1",
+        help="Robot config: robot_id (e.g. real_mower_d1) or .toml path",
+    )
     args = parser.parse_args()
 
-    init_all(classes=args.classes, arm_host=args.arm_host, arm_port=args.arm_port)
+    init_all(config_path=args.config)
 
     import uvicorn
     print(f"\n[real_task] 服务启动: http://{args.host}:{args.port}", flush=True)

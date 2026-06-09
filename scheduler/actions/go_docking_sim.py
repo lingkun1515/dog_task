@@ -14,7 +14,12 @@ def execute(fsm):
     logger.info("GO_DOCKING: 返回充电桩 (%.2f, %.2f)", fsm.config.home_x, fsm.config.home_y)
     fsm.notify_timeline("return_A")
 
-    payload = {"x": fsm.config.home_x, "y": fsm.config.home_y, "require_heading": True}
+    payload = {
+        "x": fsm.config.home_x,
+        "y": fsm.config.home_y,
+        "require_heading": True,
+        "goal_heading": 0.0,
+    }
 
     for attempt in range(1, fsm.max_retries + 1):
         logger.info("GO_DOCKING: 第%d次尝试", attempt)

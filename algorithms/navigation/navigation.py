@@ -23,7 +23,7 @@ class NavState(Enum):
 
 
 class NavigationController:
-    """Point-to-point navigation with optional heading requirement."""
+    """Point-to-point navigation with optional final heading alignment."""
 
     def __init__(
         self,
@@ -39,7 +39,8 @@ class NavigationController:
 
         self._state = NavState.IDLE
         self._target = np.zeros(2)
-        self._require_heading = True
+        self._require_heading = False
+        self._goal_heading: float | None = None
         self._step_count = 0
         self._heading_stable_count = 0
 
@@ -49,14 +50,24 @@ class NavigationController:
 
     def set_target(
         self, x: float, y: float,
-        require_heading: bool = True,
+        require_heading: bool = False,
+        goal_heading: float | None = None,
         arrival_threshold: float | None = None,
     ) -> None:
+        """设置导航目标。
+
+        Args:
+            x, y: 目标位置
+            require_heading: 到达后是否需要对齐朝向
+            goal_heading: 目标朝向角(rad)。None=面朝行进方向，数值=固定角度(如0=初始朝向)
+            arrival_threshold: 到达判定距离覆盖
+        """
         self._target = np.array([x, y])
         self._require_heading = require_heading
+        self._goal_heading = goal_heading
         if arrival_threshold is not None:
             self.arrival_threshold = arrival_threshold
-        self._state = NavState.ALIGN if require_heading else NavState.MOVE
+        self._state = NavState.MOVE
         self._step_count = 0
         self._heading_stable_count = 0
 
@@ -81,36 +92,40 @@ class NavigationController:
         dx = self._target[0] - base_pos[0]
         dy = self._target[1] - base_pos[1]
         distance = math.hypot(dx, dy)
-        target_heading = math.atan2(dy, dx)
+        move_heading = math.atan2(dy, dx)
 
-        heading_error = target_heading - base_yaw
-        heading_error = math.atan2(math.sin(heading_error), math.cos(heading_error))
+        move_heading_error = move_heading - base_yaw
+        move_heading_error = math.atan2(math.sin(move_heading_error), math.cos(move_heading_error))
 
         min_steps = 20
         min_stable = 15
-
-        heading_ok = abs(heading_error) < self.heading_threshold
-        if heading_ok:
-            self._heading_stable_count += 1
-        else:
-            self._heading_stable_count = 0
 
         if distance < self.arrival_threshold and self._step_count >= min_steps:
             if not self._require_heading:
                 self._state = NavState.ARRIVED
                 return np.zeros(3)
-            if heading_ok and self._heading_stable_count >= min_stable:
+            # 到达后对齐 goal_heading
+            final_heading = self._goal_heading if self._goal_heading is not None else move_heading
+            final_error = final_heading - base_yaw
+            final_error = math.atan2(math.sin(final_error), math.cos(final_error))
+            if abs(final_error) < self.heading_threshold:
+                self._heading_stable_count += 1
+            else:
+                self._heading_stable_count = 0
+            if self._heading_stable_count >= min_stable:
                 self._state = NavState.ARRIVED
                 return np.zeros(3)
-            vyaw = self.angular_speed if heading_error > 0 else -self.angular_speed
+            self._state = NavState.ALIGN
+            vyaw = self.angular_speed if final_error > 0 else -self.angular_speed
             return np.array([0.0, 0.0, vyaw])
 
-        if self._require_heading and abs(heading_error) > self.heading_threshold:
+        # 行进中：先对齐行进方向再前进
+        if abs(move_heading_error) > self.heading_threshold * 3:
             self._state = NavState.ALIGN
-            vyaw = self.angular_speed if heading_error > 0 else -self.angular_speed
+            vyaw = self.angular_speed if move_heading_error > 0 else -self.angular_speed
             return np.array([0.0, 0.0, vyaw])
 
         self._state = NavState.MOVE
         vx = min(self.linear_speed, distance * 0.5)
-        vyaw = heading_error * 2.0
+        vyaw = move_heading_error * 2.0
         return np.array([vx, 0.0, vyaw])
