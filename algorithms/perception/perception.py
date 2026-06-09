@@ -19,8 +19,12 @@ import os
 
 import numpy as np
 
+import logging
+
 from algorithms.perception.base import Detection, ObjectDetector
 from algorithms.perception.depth_utils import depth_at_pixel, deproject_pixel
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -62,11 +66,11 @@ def _get_yolo_model(classes=None):
         return _YOLO_MODEL
     os.environ.setdefault("YOLO_AUTOINSTALL", "false")
     from ultralytics import YOLO
-    print("加载 YOLOv8l-worldv2 模型...", flush=True)
+    logger.info("加载 YOLOv8l-worldv2 模型...")
     _YOLO_MODEL = YOLO("yolov8l-worldv2.pt")
     if classes:
         _YOLO_MODEL.set_classes(classes)
-    print("  YOLO 模型就绪", flush=True)
+    logger.info("YOLO 模型就绪")
     return _YOLO_MODEL
 
 
@@ -311,6 +315,11 @@ class SimObjectDetector(ObjectDetector):
 
         self._intrinsics = camera.get_intrinsics()
 
+        # 帧标注检测缓存（避免每帧都跑完整管线）
+        self._cached_detections: list[Detection] = []
+        self._cache_time: float = 0.0
+        self._cache_interval: float = 0.5
+
     # ------------------------------------------------------------------
     # ObjectDetector 接口
     # ------------------------------------------------------------------
@@ -324,22 +333,23 @@ class SimObjectDetector(ObjectDetector):
         dets = self._detect_yolo()
         if dets:
             for d in dets:
-                print(f"[SimDetect] YOLO: {d.label} conf={d.confidence:.2f} "
-                      f"pixel=({d.center_pixel[0]},{d.center_pixel[1]}) depth={d.depth_m:.3f}m")
+                logger.debug("YOLO: %s conf=%.2f pixel=(%d,%d) depth=%.3fm",
+                             d.label, d.confidence, d.center_pixel[0], d.center_pixel[1], d.depth_m)
             return dets
 
         # 2. HSV fallback
         dets = self._detect_hsv()
         if dets:
             for d in dets:
-                print(f"[SimDetect] HSV: {d.label} pixel=({d.center_pixel[0]},{d.center_pixel[1]}) depth={d.depth_m:.3f}m")
+                logger.debug("HSV: %s pixel=(%d,%d) depth=%.3fm",
+                             d.label, d.center_pixel[0], d.center_pixel[1], d.depth_m)
             return dets
 
         # 3. xpos 兜底
         dets = self._detect_from_xpos()
         if dets:
             for d in dets:
-                print(f"[SimDetect] xpos: {d.label} depth={d.depth_m:.3f}m")
+                logger.debug("xpos: %s depth=%.3fm", d.label, d.depth_m)
         return dets
 
     def _detect_yolo(self) -> list[Detection]:
@@ -370,41 +380,34 @@ class SimObjectDetector(ObjectDetector):
     # 图像标注（用于相机推流）
     # ------------------------------------------------------------------
     def annotate_frame(self, rgb: np.ndarray) -> np.ndarray:
-        """在 RGB 图像上绘制检测框。"""
+        """在 RGB 图像上绘制检测框（使用完整 detect 管线的缓存结果）。"""
+        import time
+
         import cv2
 
+        now = time.time()
+        if now - self._cache_time >= self._cache_interval:
+            try:
+                self._cached_detections = self.detect()
+            except Exception:
+                pass
+            self._cache_time = now
+
         annotated = rgb.copy()
-        depth_m = self._camera.get_depth()
-        if depth_m is None:
-            return annotated
+        for det in self._cached_detections:
+            x, y, w, h = det.bbox
+            cx, cy = det.center_pixel
+            depth_label = f"{det.depth_m:.2f}m" if det.depth_m > 0 else "?m"
+            conf_label = f"{det.confidence:.0%}" if det.confidence < 1.0 else ""
+            label_text = f"{det.label} {depth_label} {conf_label}".strip()
 
-        for cfg in self._target_colors:
-            label = cfg["label"]
-            lower = np.array(cfg["lower"])
-            upper = np.array(cfg["upper"])
-            hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
-            mask = cv2.inRange(hsv, lower, upper)
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            for c in contours:
-                area = cv2.contourArea(c)
-                if area < 50:
-                    continue
-                x, y, w, h = cv2.boundingRect(c)
-                cx, cy = x + w // 2, y + h // 2
-
-                d = depth_at_pixel(depth_m, cx, cy)
-                depth_label = f"{d:.2f}m" if d is not None else "?m"
-                label_text = f"{label} {depth_label}"
-
-                cv2.rectangle(annotated, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                cv2.circle(annotated, (cx, cy), 4, (0, 255, 0), -1)
-                cv2.putText(annotated, label_text, (x, y - 8),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 3)
-                cv2.putText(annotated, label_text, (x, y - 8),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 1)
+            color = _COLORS.get(det.label, (0, 255, 0))
+            cv2.rectangle(annotated, (x, y), (x + w, y + h), color, 2)
+            cv2.circle(annotated, (cx, cy), 4, color, -1)
+            cv2.putText(annotated, label_text, (x, y - 8),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 3)
+            cv2.putText(annotated, label_text, (x, y - 8),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 1)
 
         return annotated
 

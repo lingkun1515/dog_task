@@ -24,7 +24,15 @@ if str(_PROJECT_ROOT) not in sys.path:
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from utils.logging import setup_logging
+
+setup_logging("execution", "logs/execution.log")
+
+import logging
+
 from algorithms.calibration.base import CalibrationResult
+
+logger = logging.getLogger(__name__)
 from algorithms.calibration.real_calibration import load_calibration
 from algorithms.grasp.executor import RealArmExecutor
 from algorithms.grasp.planner import GraspConfig, GraspPlanner

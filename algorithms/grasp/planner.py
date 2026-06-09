@@ -14,11 +14,14 @@ Sim 和 Real 共用同一个 GraspPlanner 类，仅底层组件不同：
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from enum import Enum
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 from algorithms.calibration.base import CalibrationResult
 from algorithms.grasp.executor import ArmExecutor
@@ -119,7 +122,7 @@ class GraspPlanner:
             self._status_msg = "detecting"
 
             if attempt > 0:
-                print(f"[GraspPlanner] 重试抓取 (第{attempt+1}次)，重新检测定位")
+                logger.info("重试抓取 (第%d次)，重新检测定位", attempt + 1)
                 self._executor.set_gripper(cfg.gripper_open)
                 self._executor.move_to_joints(cfg.safe_park + [cfg.gripper_open], mode=1, wait_time=cfg.move_wait)
                 time.sleep(1.0)
@@ -145,8 +148,8 @@ class GraspPlanner:
                     return self._last_result
                 break
 
-            print(f"[GraspPlanner] 检测到 {best.label} conf={best.confidence:.2f} "
-                  f"pixel=({best.center_pixel[0]},{best.center_pixel[1]}) depth={best.depth_m:.3f}m")
+            logger.info("检测到 %s conf=%.2f pixel=(%d,%d) depth=%.3fm",
+                       best.label, best.confidence, best.center_pixel[0], best.center_pixel[1], best.depth_m)
 
             # === 2. 坐标变换：camera 3D → arm base frame ===
             # Sim/Real 统一路径：Detection.position_cam → CalibrationResult.cam_to_arm()
@@ -155,7 +158,7 @@ class GraspPlanner:
                 self._set_error("transform_failed", "坐标变换失败")
                 return self._last_result
 
-            print(f"[GraspPlanner] arm 坐标: ({target_arm[0]:.4f}, {target_arm[1]:.4f}, {target_arm[2]:.4f})")
+            logger.info("arm 坐标: (%.4f, %.4f, %.4f)", target_arm[0], target_arm[1], target_arm[2])
 
             # === 3. SAFE_PARK ===
             self._state = GraspState.PARKING
@@ -176,7 +179,7 @@ class GraspPlanner:
 
             fk_world = np.array(self._kinematics.get_position(ik_above))
             fk_arm = fk_world - np.array(self._kinematics.arm_base_world_pos)
-            print(f"[GraspPlanner] IK OK, FK误差={np.linalg.norm(fk_arm - above)*1000:.1f}mm")
+            logger.info("IK OK, FK误差=%.1fmm", np.linalg.norm(fk_arm - above) * 1000)
 
             # === 5. 移动到上方 ===
             self._state = GraspState.MOVING_ABOVE
@@ -200,7 +203,7 @@ class GraspPlanner:
                 tp = [target_arm[0], target_arm[1], current_z]
                 ik_step = self._kinematics.inverse_kinematics(tp, initial_angles_deg=prev_ik)
                 if ik_step is None:
-                    print(f"[GraspPlanner] 下降步{step} IK 失败，停止下降")
+                    logger.warning("下降步%d IK 失败，停止下降", step)
                     break
                 self._executor.move_to_joints(ik_step + [cfg.gripper_open], mode=1, wait_time=cfg.move_wait)
                 prev_ik = ik_step
@@ -216,7 +219,7 @@ class GraspPlanner:
             time.sleep(cfg.gripper_wait)
             self._executor.set_gripper(cfg.gripper_close)
             time.sleep(cfg.gripper_wait)
-            print("[GraspPlanner] 夹爪闭合完成")
+            logger.info("夹爪闭合完成")
 
             # === 8. 提起 ===
             self._state = GraspState.LIFTING
@@ -246,7 +249,7 @@ class GraspPlanner:
                     "arm_xyz": [round(float(v), 4) for v in target_arm],
                 },
             }
-            print("[GraspPlanner] 抓取完成")
+            logger.info("抓取完成")
             return self._last_result
 
         return self._last_result
@@ -283,8 +286,8 @@ class GraspPlanner:
             result = self._kinematics.inverse_kinematics(target_xyz.tolist(), initial_angles_deg=init)
             if result is not None:
                 return result
-        print(f"[GraspPlanner] IK 所有种子均失败: target_arm={target_xyz.tolist()}, "
-              f"arm_base_world={self._kinematics.arm_base_world_pos.tolist()}")
+        logger.warning("IK 所有种子均失败: target_arm=%s, arm_base_world=%s",
+                       target_xyz.tolist(), self._kinematics.arm_base_world_pos.tolist())
         return None
 
     def _set_error(self, error: str, message: str) -> None:

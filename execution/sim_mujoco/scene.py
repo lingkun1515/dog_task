@@ -2,42 +2,41 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from copy import deepcopy
 
 import numpy as np
 
-from execution.sim_mujoco.camera import SimRGBDCamera
-from execution.sim_mujoco.grasp import GraspController, GraspState
+logger = logging.getLogger(__name__)
+
+from algorithms.calibration.sim_calibration import create_sim_calibration
+from algorithms.grasp.executor import SimArmExecutor
+from algorithms.grasp.planner import GraspConfig, GraspPlanner, GraspState as PlannerState
+from algorithms.kinematics.sim_arm_ik import SimArmKinematics
 from algorithms.navigation import NavState, NavigationController
+from algorithms.perception.perception import SimObjectDetector
+from execution.sim_mujoco.camera import SimRGBDCamera
 from execution.sim_mujoco.policy_runner import PolicyRunner
 from execution.sim_mujoco.robot_loader import RobotSim
 from execution.sim_mujoco.viewer import PassiveViewer
 
-# Algorithm-based grasp (optional — lazy import)
-_ALGO_AVAILABLE = False
-try:
-    from algorithms.calibration.sim_calibration import create_sim_calibration
-    from algorithms.grasp.executor import SimArmExecutor
-    from algorithms.grasp.planner import GraspConfig, GraspPlanner
-    from algorithms.kinematics.sim_arm_ik import SimArmKinematics
-    from algorithms.perception.perception import SimObjectDetector
-
-    _ALGO_AVAILABLE = True
-except ImportError:
-    pass
-
 
 class SimulationScene:
-    """Manages the MuJoCo simulation loop and controller orchestration."""
+    """Manages the MuJoCo simulation loop and controller orchestration.
+
+    Uses the same algorithm-based grasp pipeline as real robot (no open-loop fallback).
+    """
 
     def __init__(self, config_path: str | None = None, render_mode: str = "headless"):
         self.robot = RobotSim(config_path)
         cfg = self.robot.cfg
-
         self._render_mode = render_mode
 
+        default_angles = cfg.get("default_angles", self.robot.default_angles.tolist())
+
+        # ---- Navigation ----
         self.nav = NavigationController(
             linear_speed=cfg.get("nav_linear_speed", 0.5),
             angular_speed=cfg.get("nav_angular_speed", 0.8),
@@ -45,103 +44,8 @@ class SimulationScene:
             heading_threshold=cfg.get("nav_heading_threshold", 0.1),
         )
 
-        grasp_angles = cfg.get("grasp_arm_angles", [0.3, 1.5, -2.2, 0.5, -1.0, 0.0])
-        default_angles = cfg.get("default_angles", self.robot.default_angles.tolist())
-        self.grasp = GraspController(
-            grasp_angles=grasp_angles,
-            default_angles=default_angles,
-            step_duration=cfg.get("grasp_step_duration", 0.02),
-            hold_duration=cfg.get("grasp_hold_duration", 1.0),
-        )
-
-        # ---- Algorithm-based grasp (New!) ----
-        self._algo_planner: GraspPlanner | None = None
-        self._algo_thread: threading.Thread | None = None
-        self._algo_running = False
-        self._sim_detector = None  # SimObjectDetector | None — 用于帧标注
-
-        # 优先初始化探测器（用于帧标注可视化），独立于算法管道
-        algo_cfg = cfg.get("algorithms")
-        if algo_cfg:
-            try:
-                target_bodies = algo_cfg.get("target_bodies", [])
-                target_labels = algo_cfg.get("target_labels", target_bodies)
-                if target_bodies:
-                    from algorithms.perception.perception import SimObjectDetector
-                    self._sim_detector = SimObjectDetector(
-                        model=self.robot.model,
-                        data=self.robot.data,
-                        camera=self.camera,
-                        target_body_names=target_bodies,
-                        labels=target_labels,
-                    )
-                    print("[scene] 检测器已初始化（用于帧标注可视化）")
-            except Exception as e:
-                print(f"[scene] 检测器初始化失败: {e}")
-
-        if algo_cfg and _ALGO_AVAILABLE:
-            try:
-                arm_base_body = algo_cfg["arm_base_body"]
-                target_bodies = algo_cfg["target_bodies"]
-                target_labels = algo_cfg.get("target_labels", target_bodies)
-
-                # 复用已初始化的检测器，或新建
-                if self._sim_detector is not None:
-                    detector = self._sim_detector
-                else:
-                    from algorithms.perception.perception import SimObjectDetector
-                    detector = SimObjectDetector(
-                        model=self.robot.model,
-                        data=self.robot.data,
-                        camera=self.camera,
-                        target_body_names=target_bodies,
-                        labels=target_labels,
-                    )
-
-                arm_kinematics_type = algo_cfg.get("arm_kinematics", "d1")
-                if arm_kinematics_type == "d1":
-                    from algorithms.kinematics.sim_d1_ik import SimD1Kinematics
-                    kinematics = SimD1Kinematics(
-                        model=self.robot.model,
-                        data=self.robot.data,
-                        arm_base_body_name=arm_base_body,
-                    )
-                else:
-                    tcp_body = algo_cfg.get("tcp_body", arm_base_body)
-                    kinematics = SimArmKinematics(
-                        model=self.robot.model,
-                        data=self.robot.data,
-                        tcp_body_name=tcp_body,
-                        arm_base_body_name=arm_base_body,
-                        qpos_arm_slice=slice(19, 25),
-                    )
-                calibration = create_sim_calibration(
-                    model=self.robot.model,
-                    data=self.robot.data,
-                    camera_name="front_cam",
-                    arm_base_body_name=arm_base_body,
-                )
-                executor = SimArmExecutor(self.robot)
-
-                grasp_config = GraspConfig(
-                    approach_height=algo_cfg.get("approach_height", 0.12),
-                    descend_step=algo_cfg.get("descend_step", 0.015),
-                    gripper_open=algo_cfg.get("gripper_open", 65),
-                    gripper_close=algo_cfg.get("gripper_close", 0),
-                    safe_park=algo_cfg.get("safe_park_angles", [0.0, 1.0, -0.8, 0.0, -0.3, 0.0]),
-                )
-                self._algo_planner = GraspPlanner(
-                    kinematics=kinematics,
-                    detector=detector,
-                    calibration=calibration,
-                    executor=executor,
-                    config=grasp_config,
-                )
-                self._sim_detector = detector
-                print("[scene] Algorithm-based grasp enabled (GraspPlanner)")
-            except Exception as e:
-                print(f"[scene] Algorithm grasp init failed: {e} — falling back to open-loop")
-                self._algo_planner = None
+        # ---- Arm RL switch ----
+        self._arm_rl_enabled = cfg.get("arm_rl_enabled", True)
 
         # ---- RL policy (leg locomotion) ----
         try:
@@ -155,8 +59,9 @@ class SimulationScene:
                 num_hist=cfg.get("num_hist", 3),
             )
             self._use_policy = True
+            logger.info("RL policy 已加载")
         except Exception as e:
-            print(f"[scene] RL policy unavailable: {e} — falling back to sliding mode")
+            logger.warning("RL policy 不可用: %s — 回退到滑动模式", e)
             self._use_policy = False
             self.policy = None
             self.robot.kps = np.array(cfg.get("kps", self.robot.kps.tolist()), dtype=np.float64)
@@ -164,7 +69,7 @@ class SimulationScene:
             self.robot.default_angles = np.array(default_angles, dtype=np.float64)
             self.robot._target_dof_pos = self.robot.default_angles.copy()
 
-        # Viewer BEFORE camera so the GL context is active for MjrContext.
+        # ---- Viewer (must be before camera for GL context) ----
         self._viewer: PassiveViewer | None = None
         if self._render_mode == "gui":
             try:
@@ -175,10 +80,10 @@ class SimulationScene:
                     height=cfg.get("window_height", 900),
                 )
             except RuntimeError as e:
-                print(f"[scene] GUI window unavailable: {e} — falling back to headless")
+                logger.warning("GUI 窗口不可用: %s — 回退到 headless", e)
                 self._render_mode = "headless"
 
-        # Share Viewer's GL context with camera for off-screen rendering in GUI mode
+        # ---- Camera (needs viewer GL context) ----
         viewer_context = self._viewer._context if self._viewer is not None else None
         self.camera = SimRGBDCamera(
             model=self.robot.model,
@@ -188,6 +93,70 @@ class SimulationScene:
             context=viewer_context,
             cam_name=cfg.get("camera_name", "front_cam"),
         )
+
+        # ---- Algorithm-based grasp (same pipeline as real robot) ----
+        self._algo_planner: GraspPlanner | None = None
+        self._algo_thread: threading.Thread | None = None
+        self._algo_running = False
+        self._sim_detector: SimObjectDetector | None = None
+
+        algo_cfg = cfg.get("algorithms")
+        if not algo_cfg:
+            raise RuntimeError("config 中缺少 'algorithms' 段，无法初始化抓取管线")
+
+        arm_base_body = algo_cfg["arm_base_body"]
+        target_bodies = algo_cfg["target_bodies"]
+        target_labels = algo_cfg.get("target_labels", target_bodies)
+
+        self._sim_detector = SimObjectDetector(
+            model=self.robot.model,
+            data=self.robot.data,
+            camera=self.camera,
+            target_body_names=target_bodies,
+            labels=target_labels,
+        )
+
+        arm_kinematics_type = algo_cfg.get("arm_kinematics", "d1")
+        if arm_kinematics_type == "d1":
+            from algorithms.kinematics.sim_d1_ik import SimD1Kinematics
+            kinematics = SimD1Kinematics(
+                model=self.robot.model,
+                data=self.robot.data,
+                arm_base_body_name=arm_base_body,
+            )
+        else:
+            tcp_body = algo_cfg.get("tcp_body", arm_base_body)
+            kinematics = SimArmKinematics(
+                model=self.robot.model,
+                data=self.robot.data,
+                tcp_body_name=tcp_body,
+                arm_base_body_name=arm_base_body,
+                qpos_arm_slice=slice(19, 25),
+            )
+
+        calibration = create_sim_calibration(
+            model=self.robot.model,
+            data=self.robot.data,
+            camera_name="front_cam",
+            arm_base_body_name=arm_base_body,
+        )
+        executor = SimArmExecutor(self.robot)
+
+        grasp_config = GraspConfig(
+            approach_height=algo_cfg.get("approach_height", 0.12),
+            descend_step=algo_cfg.get("descend_step", 0.015),
+            gripper_open=algo_cfg.get("gripper_open", 65),
+            gripper_close=algo_cfg.get("gripper_close", 0),
+            safe_park=algo_cfg.get("safe_park_angles", [0.0, 1.0, -0.8, 0.0, -0.3, 0.0]),
+        )
+        self._algo_planner = GraspPlanner(
+            kinematics=kinematics,
+            detector=self._sim_detector,
+            calibration=calibration,
+            executor=executor,
+            config=grasp_config,
+        )
+        logger.info("算法抓取管线已初始化 (与实机一致)")
 
         # ---- keyboard teleop (only in GUI mode) ----
         self._kb_controller = None
@@ -205,25 +174,10 @@ class SimulationScene:
     # ------------------------------------------------------------------
     def _refresh_snapshot(self) -> None:
         with self._lock:
-            # Map algorithm grasp state to legacy GraspState
-            from execution.sim_mujoco.grasp import GraspState as GS
-            _state_map = {
-                "idle": GS.IDLE,
-                "detecting": GS.MOVING_TO_GRASP,
-                "moving_above": GS.MOVING_TO_GRASP,
-                "descending": GS.MOVING_TO_GRASP,
-                "gripping": GS.HOLDING,
-                "lifting": GS.RETURNING,
-                "parking": GS.RETURNING,
-                "success": GS.SUCCESS,
-                "error": GS.ERROR,
-            }
-            if self._algo_planner is not None and self._algo_planner.state.value != "idle":
-                gs = _state_map.get(self._algo_planner.state.value, GS.IDLE)
-            elif self._algo_running and self._algo_planner is not None:
-                gs = _state_map.get(self._algo_planner.state.value, GS.IDLE)
+            if self._algo_planner is not None:
+                gs = self._algo_planner.state.value
             else:
-                gs = self.grasp.state
+                gs = "idle"
 
             self._state_snapshot = {
                 "base_pos": self.robot.base_position.tolist(),
@@ -278,7 +232,6 @@ class SimulationScene:
             self.stop()
         self.robot.reset()
         self.nav.cancel()
-        self.grasp.cancel()
         if self.policy is not None:
             self.policy.reset()
         self._refresh_snapshot()
@@ -289,16 +242,15 @@ class SimulationScene:
     # Keyboard teleop (lazy init — only in GUI mode)
     # ------------------------------------------------------------------
     def enable_keyboard(self) -> None:
-        """Enable keyboard teleoperation (requires pynput)."""
         if self._kb_enabled:
             return
         try:
             from execution.sim_mujoco.keyboard_teleop import KeyboardTeleop
             self._kb_controller = KeyboardTeleop()
             self._kb_enabled = True
-            print("[scene] Keyboard teleop enabled (WASD=move, QE=turn, IJKL=arm, UO=height, Space=grasp)")
+            logger.info("键盘遥控已启用 (WASD=移动, QE=转向, Space=抓取)")
         except ImportError as e:
-            print(f"[scene] Keyboard teleop unavailable: {e}")
+            logger.warning("键盘遥控不可用: %s", e)
 
     # ------------------------------------------------------------------
     # Main simulation loop
@@ -322,24 +274,20 @@ class SimulationScene:
                 # -- keyboard teleop override --
                 if self._kb_controller is not None and self._viewer is not None:
                     kb_cmd = self._kb_controller.get_command()
-                    kb_vel = kb_cmd["velocity"]  # [vx, vy, vyaw]
-                    kb_pos = kb_cmd["pos"]       # [px, py, pz, qw, qx, qy, qz]
+                    kb_vel = kb_cmd["velocity"]
+                    kb_pos = kb_cmd["pos"]
 
-                    # If keyboard is actively used (non-zero command), override nav
                     if any(abs(v) > 0.001 for v in kb_vel) or self._kb_controller.has_motion():
                         self.nav.cancel()
 
-                    # Check grasp trigger
                     if self._kb_controller.consume_grasp():
-                        if self.grasp.state in (GraspState.IDLE, GraspState.SUCCESS, GraspState.ERROR):
-                            self.grasp.start()
+                        self.start_grasp()
                 else:
                     kb_vel = np.zeros(3)
                     kb_pos = np.array([0.5, 0.0, 0.4, 1.0, 0.0, 0.0, 0.0])
 
                 # -- navigation (provides velocity command) --
                 if self.nav.state in (NavState.IDLE, NavState.ARRIVED):
-                    # Use keyboard velocity if active, otherwise zero
                     if self._kb_enabled and any(abs(v) > 0.001 for v in kb_vel):
                         vel_cmd = np.array(kb_vel, dtype=np.float64)
                     else:
@@ -357,11 +305,6 @@ class SimulationScene:
                 else:
                     pos_cmd = np.array([0.5, 0.0, 0.4, 1.0, 0.0, 0.0, 0.0], dtype=np.float64)
 
-                # -- grasp --
-                arm_pos = self.robot.get_arm_positions()
-                if not self._algo_running:
-                    self.grasp.update(arm_pos)
-
                 # -- RL policy or sliding --
                 if self._use_policy and self.policy is not None:
                     target_dof = self.policy.step(
@@ -373,8 +316,9 @@ class SimulationScene:
                         pos_command=pos_cmd,
                     )
                     self.robot._target_dof_pos = target_dof
+                    if not self._arm_rl_enabled:
+                        self.robot._target_dof_pos[12:18] = self.robot.default_angles[12:18]
                 else:
-                    # Sliding mode (fallback) — translate base directly
                     yaw = self.robot.base_yaw
                     c = np.cos(yaw)
                     s = np.sin(yaw)
@@ -389,11 +333,9 @@ class SimulationScene:
                         ctrl_dt,
                     )
 
-                # Apply arm targets: algo takes priority, otherwise old grasp controller
+                # Apply arm targets from algorithm grasp (overrides RL/default)
                 if self._algo_running and self.robot._algo_arm_target is not None:
                     self.robot._target_dof_pos[12:18] = self.robot._algo_arm_target
-                else:
-                    self.robot.set_arm_target(self.grasp.current_target)
 
                 # -- snapshot state for HTTP reads --
                 self._refresh_snapshot()
@@ -401,7 +343,6 @@ class SimulationScene:
                 # -- render camera (throttled) --
                 if step_counter % render_mod == 0:
                     self.camera.render()
-                    # 每帧标注检测框（确保前端视频流始终显示检测结果）
                     if self._sim_detector is not None:
                         try:
                             rgb = self.camera.get_rgb()
@@ -410,21 +351,13 @@ class SimulationScene:
                                 self.camera.set_rgb_frame(annotated)
                         except Exception as e:
                             if step_counter % (render_mod * 30) == 0:
-                                print(f"[scene] 帧标注异常: {e}")
-                    elif step_counter % (render_mod * 60) == 0:
-                        # 提示用户检测器未初始化
-                        pass  # _sim_detector 为 None，不重复打印
+                                logger.debug("帧标注异常: %s", e)
                     if self._viewer is not None:
                         if not self._viewer.sync(self.robot.model, self.robot.data):
                             self._running = False
 
-            # PD control + physics step (every step regardless of mode)
-            if self._use_policy and self.policy is not None:
-                # PD is handled inside step() using _target_dof_pos
-                self.robot.step()
-            else:
-                self.robot.step()
-
+            # Physics step
+            self.robot.step()
             step_counter += 1
 
             next_wake += physics_dt
@@ -435,6 +368,7 @@ class SimulationScene:
     # Command helpers (called from server endpoints)
     # ------------------------------------------------------------------
     def navigate_to(self, x: float, y: float, require_heading: bool = True, arrival_threshold: float | None = None) -> None:
+        logger.info("导航目标设置: (%.2f, %.2f)", x, y)
         self.nav.set_target(x, y, require_heading=require_heading, arrival_threshold=arrival_threshold)
         self._refresh_snapshot()
 
@@ -443,40 +377,32 @@ class SimulationScene:
         self._refresh_snapshot()
 
     def start_grasp(self) -> None:
-        if self._algo_planner is not None:
-            self._start_algo_grasp()
-        else:
-            self.grasp.start()
-        self._refresh_snapshot()
-
-    def _start_algo_grasp(self) -> None:
-        """Run algorithm grasp in background thread."""
         if self._algo_running:
-            print("[scene] Algorithm grasp already running — ignoring duplicate request")
+            logger.warning("算法抓取已在运行中 — 忽略重复请求")
             return
+        logger.info("启动算法抓取")
         self._algo_running = True
 
         def _run():
             try:
                 self._algo_planner.execute_full_cycle()
+                logger.info("算法抓取完成: state=%s", self._algo_planner.state.value)
             except Exception as e:
-                print(f"[scene] Algorithm grasp error: {e}")
+                logger.error("算法抓取异常: %s", e)
             finally:
                 self._algo_running = False
 
         self._algo_thread = threading.Thread(target=_run, daemon=True)
         self._algo_thread.start()
+        self._refresh_snapshot()
 
     def cancel_grasp(self) -> None:
         self._algo_running = False
-        self.grasp.cancel()
         self._refresh_snapshot()
 
     def stop_all(self) -> None:
-        """Cancel all active controllers (navigation + grasp)."""
         self.nav.cancel()
         self._algo_running = False
-        self.grasp.cancel()
         self._refresh_snapshot()
 
     def get_frame(self) -> bytes | None:

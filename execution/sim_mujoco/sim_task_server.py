@@ -58,7 +58,15 @@ if str(_PROJECT_ROOT) not in sys.path:
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from utils.logging import setup_logging
+
+setup_logging("execution", "logs/execution.log")
+
+import logging
+
 from execution.sim_mujoco.scene import SimulationScene
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Global scene handle — initialised during lifespan
@@ -123,6 +131,7 @@ def navigate(body: dict[str, Any]) -> dict[str, Any]:
     arrival_threshold = body.get("arrival_threshold", None)
     if arrival_threshold is not None:
         arrival_threshold = float(arrival_threshold)
+    logger.info("导航请求: target=(%.2f, %.2f) require_heading=%s threshold=%s", x, y, require_heading, arrival_threshold)
     scene.navigate_to(x, y, require_heading=require_heading, arrival_threshold=arrival_threshold)
     return {"status": "accepted", "target": [x, y]}
 
@@ -152,6 +161,7 @@ def navigate_cancel() -> dict[str, str]:
 def grasp() -> dict[str, str]:
     """Start the grasp sequence."""
     scene = get_scene()
+    logger.info("抓取请求: 启动抓取序列")
     scene.start_grasp()
     return {"status": "accepted"}
 
@@ -162,8 +172,8 @@ def grasp_status() -> dict[str, Any]:
     gs = scene.state["grasp_state"]
     return {
         "busy": scene._algo_running,
-        "status": gs.value if hasattr(gs, "value") else str(gs),
-        "planner_state": scene._algo_planner.state.value if scene._algo_planner else str(gs),
+        "status": gs,
+        "planner_state": scene._algo_planner.state.value if scene._algo_planner else gs,
     }
 
 
@@ -184,6 +194,7 @@ def detect() -> dict[str, Any]:
                 "depth_m": round(d.depth_m, 4),
                 "confidence": round(d.confidence, 3),
             })
+    logger.debug("检测结果: %d 个目标", len(dets))
     return {"count": len(dets), "detections": dets}
 
 
@@ -201,7 +212,7 @@ def robot_state() -> dict[str, Any]:
         "base_yaw": s["base_yaw"],
         "nav_state": s["nav_state"].value,
         "nav_target": s["nav_target"],
-        "grasp_state": s["grasp_state"].value if hasattr(s["grasp_state"], "value") else str(s["grasp_state"]),
+        "grasp_state": s["grasp_state"],
         "planner_state": scene._algo_planner.state.value if scene._algo_planner else "not_init",
     }
 
@@ -238,6 +249,7 @@ def video_feed():
 @app.post("/api/stop")
 def stop_all() -> dict[str, str]:
     """Cancel navigation and grasp without resetting the simulation."""
+    logger.info("停止所有运动")
     get_scene().stop_all()
     return {"status": "stopped"}
 

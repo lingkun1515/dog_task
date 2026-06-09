@@ -28,6 +28,9 @@ default_angles: [0.1, 0.8, -1.5, -0.1, 0.8, -1.5,
                  0.1, 1.0, -1.5, -0.1, 1.0, -1.5,
                  -1.57, 0.52, -0.17, 0.0, 0.0, 0.0]
 
+# Arm RL control
+arm_rl_enabled: false        # false = 非抓取时手臂保持收缩状态，不由 RL 驱动
+
 # Navigation
 nav_linear_speed: 0.5
 nav_angular_speed: 0.8

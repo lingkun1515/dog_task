@@ -8,6 +8,10 @@ import time
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
 
+from utils.logging import setup_logging
+
+setup_logging("scheduler", "logs/scheduler.log")
+
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
