@@ -37,11 +37,11 @@ base_ang_vel_scale = 0.2
 joint_vel_scale = 0.05
 num_hist = 3
 
-# Default joint angles — Go2 standing + D1 safe park
+# Default joint angles — Go2 standing + D1 收缩 (joint1=0 正前方向上收)
 # Order: FR_hip/thigh/calf, FL_hip/thigh/calf, RR_hip/thigh/calf, RL_hip/thigh/calf, D1_j1..j6
 default_angles = [0.1, 0.8, -1.5, -0.1, 0.8, -1.5,
                   0.1, 1.0, -1.5, -0.1, 1.0, -1.5,
-                  -1.57, 0.52, -0.17, 0.0, 0.0, 0.0]
+                  0.0, 0.52, -0.17, 0.0, 0.0, 0.0]
 
 # Arm RL control: false = 非抓取时手臂保持收缩状态
 arm_rl_enabled = false
@@ -69,7 +69,9 @@ window_height = 900
 # 算法抓取配置
 # ============================================================
 [algorithms]
-arm_kinematics = "d1"           # D1 URDF IK/FK (与实机相同算法)
+# arm_kinematics: "d1" = D1 URDF 解析式FK/IK (sim2real对齐)
+#                 "mujoco" = MuJoCo数值FK + Jacobian IK (无URDF时通用)
+arm_kinematics = "d1"
 arm_base_body = "d1_base_link"
 target_bodies = ["target_sphere"]
 target_labels = ["ball"]

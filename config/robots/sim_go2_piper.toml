@@ -68,7 +68,9 @@ window_height = 900
 # 算法抓取配置
 # ============================================================
 [algorithms]
-arm_kinematics = "mujoco"       # "mujoco" = MuJoCo FK
+# arm_kinematics: "d1" = D1 URDF 解析式FK/IK (sim2real对齐)
+#                 "mujoco" = MuJoCo数值FK + Jacobian IK (无URDF时通用)
+arm_kinematics = "mujoco"
 tcp_body = "end_effector"
 arm_base_body = "Piper"
 target_bodies = ["target_sphere"]
