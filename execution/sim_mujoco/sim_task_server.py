@@ -159,7 +159,32 @@ def grasp() -> dict[str, str]:
 @app.get("/api/grasp/status")
 def grasp_status() -> dict[str, Any]:
     scene = get_scene()
-    return {"status": scene.state["grasp_state"].value}
+    gs = scene.state["grasp_state"]
+    return {
+        "busy": scene._algo_running,
+        "status": gs.value if hasattr(gs, "value") else str(gs),
+        "planner_state": scene._algo_planner.state.value if scene._algo_planner else str(gs),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Detection
+# ---------------------------------------------------------------------------
+@app.get("/api/detect")
+def detect() -> dict[str, Any]:
+    """执行单次检测并返回结果。"""
+    scene = get_scene()
+    dets: list[dict] = []
+    if scene._sim_detector is not None:
+        for d in scene._sim_detector.detect():
+            dets.append({
+                "label": d.label,
+                "center": list(d.center_pixel),
+                "bbox": list(d.bbox),
+                "depth_m": round(d.depth_m, 4),
+                "confidence": round(d.confidence, 3),
+            })
+    return {"count": len(dets), "detections": dets}
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +193,17 @@ def grasp_status() -> dict[str, Any]:
 @app.get("/api/state")
 def robot_state() -> dict[str, Any]:
     """Full robot state snapshot."""
-    return get_scene().state
+    scene = get_scene()
+    s = scene.state
+    return {
+        "busy": scene._algo_running,
+        "base_pos": s["base_pos"][:2],
+        "base_yaw": s["base_yaw"],
+        "nav_state": s["nav_state"].value,
+        "nav_target": s["nav_target"],
+        "grasp_state": s["grasp_state"].value if hasattr(s["grasp_state"], "value") else str(s["grasp_state"]),
+        "planner_state": scene._algo_planner.state.value if scene._algo_planner else "not_init",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +249,29 @@ def stop_all() -> dict[str, str]:
 def reset() -> dict[str, str]:
     get_scene().reset()
     return {"status": "reset"}
+
+
+# ---------------------------------------------------------------------------
+# Backward-compatible aliases (old paths)
+# ---------------------------------------------------------------------------
+@app.post("/grasp")
+def grasp_legacy():
+    return grasp()
+
+
+@app.get("/status")
+def grasp_status_legacy():
+    return grasp_status()
+
+
+@app.get("/detect")
+def detect_legacy():
+    return detect()
+
+
+@app.get("/video_feed")
+def video_feed_legacy():
+    return video_feed()
 
 
 # ---------------------------------------------------------------------------

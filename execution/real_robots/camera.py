@@ -1,12 +1,7 @@
-"""实机感知：D455 RealSense 相机封装。
+"""D455 RealSense 相机封装 — 执行层代码（依赖 pyrealsource2 SDK）。
 
-仅包含 RealSenseCamera 硬件接口。
-YOLODetector / HSVDetector 从 detector.py 共用（Sim/Real 统一）。
-
-使用示例:
-    camera = RealSenseCamera()
-    detector = YOLODetector(camera, classes=["bottle", "block"])
-    detections = detector.detect()
+提供统一的 get_rgb() / get_depth() / get_intrinsics() 接口，
+与 SimRGBDCamera 接口一致，YOLODetector/HSVDetector 直接使用。
 """
 
 import time
@@ -15,11 +10,7 @@ import numpy as np
 
 
 class RealSenseCamera:
-    """D455 RealSense 相机封装（延迟导入 pyrealsense2）。
-
-    提供统一的 get_rgb() / get_depth() / get_intrinsics() 接口，
-    与 SimRGBDCamera 接口一致，YOLODetector/HSVDetector 直接使用。
-    """
+    """D455 RealSense 相机封装（延迟导入 pyrealsense2）。"""
 
     def __init__(self, width=640, height=480, fps=30):
         import pyrealsense2 as rs
@@ -43,7 +34,6 @@ class RealSenseCamera:
             "width": rs_intrinsics.width,
             "height": rs_intrinsics.height,
         }
-        # 预热管线
         for _ in range(30):
             self._pipeline.wait_for_frames()
 
@@ -51,8 +41,8 @@ class RealSenseCamera:
     # 统一接口（与 SimRGBDCamera 一致）
     # ------------------------------------------------------------------
     def get_rgb(self) -> np.ndarray | None:
-        """获取当前帧 RGB 图像。"""
-        _, color = self.grab()
+        """获取当前帧 BGR 图像。"""
+        color, _ = self.grab()
         return color
 
     def get_depth(self) -> np.ndarray | None:

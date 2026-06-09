@@ -1,5 +1,5 @@
 from algorithms.perception.base import Detection, ObjectDetector
-from algorithms.perception.detector import HSVDetector, YOLODetector
+from algorithms.perception.perception import HSVDetector, SimObjectDetector, YOLODetector
 
 __all__ = [
     "Detection",
@@ -8,13 +8,3 @@ __all__ = [
     "HSVDetector",
     "SimObjectDetector",
 ]
-
-
-def __getattr__(name):
-    if name == "SimObjectDetector":
-        from algorithms.perception.sim_perception import SimObjectDetector
-        return SimObjectDetector
-    if name == "RealSenseCamera":
-        from algorithms.perception.real_perception import RealSenseCamera
-        return RealSenseCamera
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

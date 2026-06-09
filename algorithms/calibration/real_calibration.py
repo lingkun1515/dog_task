@@ -11,6 +11,16 @@ import numpy as np
 
 from algorithms.calibration.base import CalibrationResult
 
+
+def _deproject_from_df(cx: float, cy: float, depth_frame, intrinsics: dict):
+    """RealSense 深度帧 → 相机坐标系 3D 点。"""
+    d = depth_frame.get_distance(int(cx), int(cy))
+    if d == 0.0:
+        return None
+    x = (cx - intrinsics["cx"]) / intrinsics["fx"] * d
+    y = (cy - intrinsics["cy"]) / intrinsics["fy"] * d
+    return (x, y, d)
+
 OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "output")
 
 # 物理约束基础旋转矩阵（cam_X→arm_-X, cam_Y→arm_-Z, cam_Z→arm_-Y）
@@ -168,7 +178,7 @@ def run_calibration(arm_controller, camera) -> CalibrationResult | None:
                     continue
                 c = corners[j][0]
                 cx, cy = float(np.mean(c[:, 0])), float(np.mean(c[:, 1]))
-                p3d = RealSenseCamera.deproject_pixel(cx, cy, df, camera.intrinsics)
+                p3d = _deproject_from_df(cx, cy, df, camera.intrinsics)
                 if p3d is not None:
                     cam_pts.append(p3d)
 
@@ -250,4 +260,4 @@ def load_calibration(calib_path: str | None = None) -> CalibrationResult:
 
 
 # 延迟导入
-from algorithms.perception.real_perception import RealSenseCamera  # noqa: E402
+from execution.real_robots.camera import RealSenseCamera  # noqa: E402

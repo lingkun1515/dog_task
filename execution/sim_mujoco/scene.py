@@ -22,7 +22,7 @@ try:
     from algorithms.grasp.executor import SimArmExecutor
     from algorithms.grasp.planner import GraspConfig, GraspPlanner
     from algorithms.kinematics.sim_arm_ik import SimArmKinematics
-    from algorithms.perception.sim_perception import SimObjectDetector
+    from algorithms.perception.perception import SimObjectDetector
 
     _ALGO_AVAILABLE = True
 except ImportError:
@@ -67,7 +67,7 @@ class SimulationScene:
                 target_bodies = algo_cfg.get("target_bodies", [])
                 target_labels = algo_cfg.get("target_labels", target_bodies)
                 if target_bodies:
-                    from algorithms.perception.sim_perception import SimObjectDetector
+                    from algorithms.perception.perception import SimObjectDetector
                     self._sim_detector = SimObjectDetector(
                         model=self.robot.model,
                         data=self.robot.data,
@@ -89,7 +89,7 @@ class SimulationScene:
                 if self._sim_detector is not None:
                     detector = self._sim_detector
                 else:
-                    from algorithms.perception.sim_perception import SimObjectDetector
+                    from algorithms.perception.perception import SimObjectDetector
                     detector = SimObjectDetector(
                         model=self.robot.model,
                         data=self.robot.data,

@@ -30,8 +30,8 @@ from algorithms.grasp.executor import RealArmExecutor
 from algorithms.grasp.planner import GraspConfig, GraspPlanner
 from algorithms.kinematics.real_d1_ik import D1Kinematics
 from algorithms.navigation import NavState, NavigationController
-from algorithms.perception.detector import YOLODetector
-from algorithms.perception.real_perception import RealSenseCamera
+from algorithms.perception.perception import YOLODetector
+from execution.real_robots.camera import RealSenseCamera
 
 # ---------------------------------------------------------------------------
 # Globals
@@ -129,6 +129,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="DogTask Real Executor", version="0.1.0", lifespan=lifespan)
 
 
+@app.exception_handler(RuntimeError)
+async def runtime_error_handler(request: Request, exc: RuntimeError):
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     import traceback
@@ -182,29 +187,37 @@ def api_navigate_cancel():
 
 
 # ===================================================================
-# Grasp（对齐 sim_task_server.py /api/grasp 系列）
+# Grasp（对齐 sim_task_server.py /api/grasp — 异步后台执行）
 # ===================================================================
 @app.post("/api/grasp")
 def api_grasp():
-    """阻塞式抓取：检测 → 抓取 → 返回结果。"""
+    """启动抓取（异步后台，立即返回）。"""
     with _state["lock"]:
         if _state["busy"]:
-            return JSONResponse(status_code=409, content={"success": False, "error": "busy"})
+            return JSONResponse(status_code=409, content={"status": "rejected", "detail": "busy"})
         _state["busy"] = True
+        _state["status"] = "running"
 
-    try:
-        if _planner is None:
-            return {"success": False, "error": "not_initialized"}
-        result = _planner.execute_full_cycle()
-        return result
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return {"success": False, "error": "exception", "message": str(e)}
-    finally:
+    if _planner is None:
         with _state["lock"]:
             _state["busy"] = False
             _state["status"] = "idle"
+        return JSONResponse(status_code=503, content={"detail": "not_initialized"})
+
+    def _run():
+        try:
+            _planner.execute_full_cycle()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+        finally:
+            with _state["lock"]:
+                _state["busy"] = False
+                _state["status"] = "idle"
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    return {"status": "accepted"}
 
 
 @app.get("/api/grasp/status")
