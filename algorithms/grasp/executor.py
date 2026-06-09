@@ -46,6 +46,9 @@ class SimArmExecutor(ArmExecutor):
     def move_to_joints(self, angles: list[float], mode: int = 1, wait_time: float = 2.0) -> None:
         # IK 返回的是度，MuJoCo PD 控制需要弧度
         self._robot._algo_arm_target = np.deg2rad(np.array(angles[:6], dtype=np.float64))
+        # 给仿真 PD 控制器时间推进（step 循环在另一个线程）
+        import time
+        time.sleep(wait_time)
 
     def set_gripper(self, angle: float) -> None:
         # MuJoCo 仿真中的夹爪是 PD 控制的最后一段
@@ -59,10 +62,16 @@ class SimArmExecutor(ArmExecutor):
     def wait_until_reached(
         self, target: list[float], threshold: float = 3.0, timeout: float = 20.0
     ) -> bool:
-        # 仿真中不主动等待（由外层 step 循环推进）
-        cur = np.array(self.get_current_joints())
-        tgt = np.array(target[:6])
-        return float(np.max(np.abs(cur - tgt))) < threshold
+        # 仿真中 PD 快速收敛，短暂等待后检查
+        import time
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            cur = np.array(self.get_current_joints())
+            tgt = np.array(target[:6])
+            if float(np.max(np.abs(cur - tgt))) < threshold:
+                return True
+            time.sleep(0.05)
+        return False
 
 
 class RealArmExecutor(ArmExecutor):

@@ -170,6 +170,10 @@ class D1Kinematics:
                 q[i] = np.clip(q[i], lo, hi)
 
         final_pos = np.array(D1Kinematics.get_position(np.rad2deg(q)))
-        if np.linalg.norm(target - final_pos) < tol * 5:
+        final_err = np.linalg.norm(target - final_pos)
+        if final_err < tol * 5:
             return np.rad2deg(q).tolist()
+        print(f"[D1Kinematics.IK] 求解失败: target={target.tolist()}, "
+              f"final_err={final_err*1000:.1f}mm, tol×5={tol*5000:.1f}mm, "
+              f"iters={max_iter}")
         return None

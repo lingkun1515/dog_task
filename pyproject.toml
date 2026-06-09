@@ -24,7 +24,7 @@ realsense = [
 
 [project.scripts]
 dogtask-server = "scheduler.server.app:run_server"
-dogtask-sim = "execution.sim_mujoco.server:run_server"
+dogtask-sim = "execution.sim_mujoco.sim_task_server:main"
 
 [build-system]
 requires = ["uv_build>=0.11.14,<0.12.0"]

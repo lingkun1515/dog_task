@@ -101,7 +101,7 @@
       <geom size="0.05 0.045" pos="0.285 0 0.01" type="cylinder" class="collision" />
       <geom size="0.047" pos="0.293 0 -0.06" class="collision" />
       <site name="imu" pos="0 0 0.01" />
-      <camera name="front_cam" pos="0.28 0 0.08" xyaxes="0 -1 0 0 0 1" fovy="60" />
+      <camera name="front_cam" pos="0.28 0 0.08" xyaxes="0 -1 0 0 0 1" fovy="65" />
 
       <!-- ===== Go2 Legs (FL, FR, RL, RR) ===== -->
       <body name="FL_hip" pos="0.1934 0.0465 0">

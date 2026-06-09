@@ -48,8 +48,8 @@
     <body name="start_flag" pos="-0.5 -10.5 0.02">
       <geom name="flag_pole" type="cylinder" size="0.03 1.2" material="pole_gray"/>
       <geom name="flag_banner" type="box" pos="0.15 0 1.1" size="0.18 0.005 0.12" material="flag_red"/>
-      <!-- Start platform -->
-      <geom name="start_platform" type="box" pos="0 0 -0.01" size="0.4 0.4 0.02" rgba="0.7 0.7 0.7 1"/>
+      <!-- Start platform (flat, no height to avoid tripping) -->
+      <geom name="start_platform" type="box" pos="0 0 0.001" size="0.4 0.4 0.001" rgba="0.7 0.7 0.7 1"/>
     </body>
 
     <!-- ===== Target area: red cross marker on ground at (12, 0) ===== -->

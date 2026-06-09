@@ -1,9 +1,9 @@
-"""FastAPI server for MuJoCo simulation execution service.
+"""Sim 端 FastAPI 执行服务（MuJoCo 仿真）。
 
-Start with:
-    python -m execution.sim_mujoco.server
-    python -m execution.sim_mujoco.server --port 8100
-    python -m execution.sim_mujoco.server --render       # desktop GUI window
+启动:
+    python -m execution.sim_mujoco.sim_task_server
+    python -m execution.sim_mujoco.sim_task_server --port 8100
+    python -m execution.sim_mujoco.sim_task_server --render   # 桌面 GUI 窗口
 """
 
 from __future__ import annotations
@@ -249,7 +249,7 @@ def main():
         _scene.run()
     else:
         uvicorn.run(
-            "execution.sim_mujoco.server:app",
+            "execution.sim_mujoco.sim_task_server:app",
             host=_args.host,
             port=_args.port,
             log_level="info",

@@ -130,8 +130,12 @@ class SimArmKinematics(ArmKinematics):
 
         tcp_world = self._tcp_world_pos(q)
         tcp_arm = tcp_world - arm_base_pos
-        if np.linalg.norm(target - tcp_arm) < tol * 5:
+        final_err = np.linalg.norm(target - tcp_arm)
+        if final_err < tol * 5:
             return np.rad2deg(q).tolist()
+        print(f"[SimArmKinematics.IK] 求解失败: target={target.tolist()}, "
+              f"final_err={final_err*1000:.1f}mm, tol×5={tol*5000:.1f}mm, "
+              f"iters={max_iter}")
         return None
 
     # ------------------------------------------------------------------

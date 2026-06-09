@@ -8,9 +8,9 @@ from copy import deepcopy
 
 import numpy as np
 
-from execution.sim_mujoco.camera import SimulationCamera
+from execution.sim_mujoco.camera import SimRGBDCamera
 from execution.sim_mujoco.grasp import GraspController, GraspState
-from execution.sim_mujoco.navigation import NavState, NavigationController
+from algorithms.navigation import NavState, NavigationController
 from execution.sim_mujoco.policy_runner import PolicyRunner
 from execution.sim_mujoco.robot_loader import RobotSim
 from execution.sim_mujoco.viewer import PassiveViewer
@@ -58,13 +58,45 @@ class SimulationScene:
         self._algo_planner: GraspPlanner | None = None
         self._algo_thread: threading.Thread | None = None
         self._algo_running = False
+        self._sim_detector = None  # SimObjectDetector | None — 用于帧标注
 
+        # 优先初始化探测器（用于帧标注可视化），独立于算法管道
         algo_cfg = cfg.get("algorithms")
+        if algo_cfg:
+            try:
+                target_bodies = algo_cfg.get("target_bodies", [])
+                target_labels = algo_cfg.get("target_labels", target_bodies)
+                if target_bodies:
+                    from algorithms.perception.sim_perception import SimObjectDetector
+                    self._sim_detector = SimObjectDetector(
+                        model=self.robot.model,
+                        data=self.robot.data,
+                        camera=self.camera,
+                        target_body_names=target_bodies,
+                        labels=target_labels,
+                    )
+                    print("[scene] 检测器已初始化（用于帧标注可视化）")
+            except Exception as e:
+                print(f"[scene] 检测器初始化失败: {e}")
+
         if algo_cfg and _ALGO_AVAILABLE:
             try:
                 arm_base_body = algo_cfg["arm_base_body"]
                 target_bodies = algo_cfg["target_bodies"]
                 target_labels = algo_cfg.get("target_labels", target_bodies)
+
+                # 复用已初始化的检测器，或新建
+                if self._sim_detector is not None:
+                    detector = self._sim_detector
+                else:
+                    from algorithms.perception.sim_perception import SimObjectDetector
+                    detector = SimObjectDetector(
+                        model=self.robot.model,
+                        data=self.robot.data,
+                        camera=self.camera,
+                        target_body_names=target_bodies,
+                        labels=target_labels,
+                    )
 
                 arm_kinematics_type = algo_cfg.get("arm_kinematics", "d1")
                 if arm_kinematics_type == "d1":
@@ -83,12 +115,6 @@ class SimulationScene:
                         arm_base_body_name=arm_base_body,
                         qpos_arm_slice=slice(19, 25),
                     )
-                detector = SimObjectDetector(
-                    model=self.robot.model,
-                    data=self.robot.data,
-                    target_body_names=target_bodies,
-                    labels=target_labels,
-                )
                 calibration = create_sim_calibration(
                     model=self.robot.model,
                     data=self.robot.data,
@@ -110,8 +136,8 @@ class SimulationScene:
                     calibration=calibration,
                     executor=executor,
                     config=grasp_config,
-                    sim_mode=True,
                 )
+                self._sim_detector = detector
                 print("[scene] Algorithm-based grasp enabled (GraspPlanner)")
             except Exception as e:
                 print(f"[scene] Algorithm grasp init failed: {e} — falling back to open-loop")
@@ -154,12 +180,13 @@ class SimulationScene:
 
         # Share Viewer's GL context with camera for off-screen rendering in GUI mode
         viewer_context = self._viewer._context if self._viewer is not None else None
-        self.camera = SimulationCamera(
+        self.camera = SimRGBDCamera(
             model=self.robot.model,
             data=self.robot.data,
             width=cfg.get("camera_width", 640),
             height=cfg.get("camera_height", 480),
             context=viewer_context,
+            cam_name=cfg.get("camera_name", "front_cam"),
         )
 
         # ---- keyboard teleop (only in GUI mode) ----
@@ -374,6 +401,19 @@ class SimulationScene:
                 # -- render camera (throttled) --
                 if step_counter % render_mod == 0:
                     self.camera.render()
+                    # 每帧标注检测框（确保前端视频流始终显示检测结果）
+                    if self._sim_detector is not None:
+                        try:
+                            rgb = self.camera.get_rgb()
+                            if rgb is not None:
+                                annotated = self._sim_detector.annotate_frame(rgb)
+                                self.camera.set_rgb_frame(annotated)
+                        except Exception as e:
+                            if step_counter % (render_mod * 30) == 0:
+                                print(f"[scene] 帧标注异常: {e}")
+                    elif step_counter % (render_mod * 60) == 0:
+                        # 提示用户检测器未初始化
+                        pass  # _sim_detector 为 None，不重复打印
                     if self._viewer is not None:
                         if not self._viewer.sync(self.robot.model, self.robot.data):
                             self._running = False
