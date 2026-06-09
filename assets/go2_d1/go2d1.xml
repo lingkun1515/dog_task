@@ -101,7 +101,7 @@
       <geom size="0.05 0.045" pos="0.285 0 0.01" type="cylinder" class="collision" />
       <geom size="0.047" pos="0.293 0 -0.06" class="collision" />
       <site name="imu" pos="0 0 0.01" />
-      <camera name="front_cam" pos="0.28 0 0.08" xyaxes="0 -1 0 0 0 1" fovy="65" />
+      <camera name="front_cam" pos="0.32 0 0.0" xyaxes="0 -1 0 0.1736 0 0.9848" fovy="65" />
 
       <!-- ===== Go2 Legs (FL, FR, RL, RR) ===== -->
       <body name="FL_hip" pos="0.1934 0.0465 0">
@@ -275,8 +275,8 @@
                     <joint name="d1_joint6" pos="0 0 0" axis="1 0 0" limited="true" range="-2.36 2.36" damping="1"/>
                     <geom type="mesh" mesh="d1_link6" rgba="0.79 0.82 0.93 1" />
 
-                    <!-- TCP site (matches D1Kinematics GRIPPER_TCP_OFFSET) -->
-                    <site name="d1_tcp" pos="-0.00562 0.0 0.0706" size="0.01" rgba="1 0 0 1"/>
+                    <!-- TCP site (matches D1Kinematics GRIPPER_TCP_OFFSET, 不渲染) -->
+                    <site name="d1_tcp" pos="-0.00562 0.0 0.0706" size="0.001" rgba="0 0 0 0"/>
 
                     <!-- Gripper fingers (fixed visual, no actuator — sim gripper is no-op) -->
                     <body name="d1_gripper_l" pos="0.0718 -0.033778 0.0031">

@@ -100,6 +100,7 @@ class SimulationScene:
         self._algo_planner: GraspPlanner | None = None
         self._algo_thread: threading.Thread | None = None
         self._algo_running = False
+        self._detect_enabled = False  # 检测标注开关：仅抓取阶段激活
         self._sim_detector: SimObjectDetector | None = None
 
         algo_cfg = cfg.get("algorithms")
@@ -355,7 +356,7 @@ class SimulationScene:
                 # -- render camera (throttled) --
                 if step_counter % render_mod == 0:
                     self.camera.render()
-                    if self._sim_detector is not None:
+                    if self._sim_detector is not None and self._detect_enabled:
                         try:
                             rgb = self.camera.get_rgb()
                             if rgb is not None:
@@ -388,12 +389,20 @@ class SimulationScene:
         self.nav.cancel()
         self._refresh_snapshot()
 
+    def enable_detect(self) -> None:
+        """启用检测标注（调度端进入抓取准备阶段时调用）。"""
+        self._detect_enabled = True
+
+    def disable_detect(self) -> None:
+        """关闭检测标注。"""
+        self._detect_enabled = False
+
     def start_grasp(self) -> None:
         if self._algo_running:
             logger.warning("算法抓取已在运行中 — 忽略重复请求")
             return
-        logger.info("启动算法抓取 — 立即停止导航")
-        self.nav.cancel()
+        logger.info("启动算法抓取")
+        self._detect_enabled = True
         self._algo_running = True
 
         def _run():
@@ -404,6 +413,7 @@ class SimulationScene:
                 logger.error("算法抓取异常: %s", e)
             finally:
                 self._algo_running = False
+                self._detect_enabled = False
 
         self._algo_thread = threading.Thread(target=_run, daemon=True)
         self._algo_thread.start()

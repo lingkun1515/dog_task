@@ -11,6 +11,9 @@ def execute(fsm):
     fsm.mark_metric("pick_and_put_begin")
     fsm.notify_timeline("arm_start")
 
+    detect_url = f"{fsm.config.execution_url}/api/detect"
+    http_post(f"{detect_url}/enable")
+
     for attempt in range(1, fsm.max_retries + 1):
         logger.info("PICK_AND_PUT: 第%d次尝试抓取", attempt)
         resp = http_post(fsm.config.grasp_url)
@@ -33,8 +36,10 @@ def execute(fsm):
         logger.warning("PICK_AND_PUT: 抓取失败 (%s)", result)
     else:
         logger.error("PICK_AND_PUT: 达到最大重试次数(%d)，任务失败", fsm.max_retries)
+        http_post(f"{detect_url}/disable")
         return RobotState.FAILED
 
+    http_post(f"{detect_url}/disable")
     fsm.mark_metric("put_begin")
     fsm.mark_metric("put_done")
     fsm.notify_timeline("arm_done")

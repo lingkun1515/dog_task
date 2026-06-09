@@ -37,11 +37,12 @@ base_ang_vel_scale = 0.2
 joint_vel_scale = 0.05
 num_hist = 3
 
-# Default joint angles — Go2 standing + D1 收缩 (joint1=0 正前方向上收)
+# Default joint angles — Go2 standing + D1 折叠平放 (大臂后倒+小臂折回贴背)
 # Order: FR_hip/thigh/calf, FL_hip/thigh/calf, RR_hip/thigh/calf, RL_hip/thigh/calf, D1_j1..j6
+# D1 arm: [0, -90°, 90°, 0, 0, 0] → 折叠贴背
 default_angles = [0.1, 0.8, -1.5, -0.1, 0.8, -1.5,
                   0.1, 1.0, -1.5, -0.1, 1.0, -1.5,
-                  0.0, 0.52, -0.17, 0.0, 0.0, 0.0]
+                  0.0, -1.57, 1.57, 0.0, 0.0, 0.0]
 
 # Arm RL control: false = 非抓取时手臂保持收缩状态
 arm_rl_enabled = false

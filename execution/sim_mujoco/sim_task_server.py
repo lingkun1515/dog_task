@@ -221,6 +221,20 @@ def detect() -> dict[str, Any]:
     return {"count": len(dets), "detections": dets}
 
 
+@app.post("/api/detect/enable")
+def detect_enable() -> dict[str, str]:
+    """启用检测标注（视频帧叠加检测框）。"""
+    get_scene().enable_detect()
+    return {"status": "enabled"}
+
+
+@app.post("/api/detect/disable")
+def detect_disable() -> dict[str, str]:
+    """关闭检测标注。"""
+    get_scene().disable_detect()
+    return {"status": "disabled"}
+
+
 # ---------------------------------------------------------------------------
 # Robot state
 # ---------------------------------------------------------------------------
