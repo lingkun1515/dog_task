@@ -34,7 +34,7 @@ arm_rl_enabled: false        # false = 非抓取时手臂保持收缩状态，�
 # Navigation
 nav_linear_speed: 0.5
 nav_angular_speed: 0.8
-nav_arrival_threshold: 0.25
+nav_arrival_threshold: 0.45
 nav_heading_threshold: 0.1
 
 # D1 arm grasp pose (legacy fallback)

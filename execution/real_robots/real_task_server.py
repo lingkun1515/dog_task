@@ -30,10 +30,10 @@ setup_logging("execution", "logs/execution.log")
 
 import logging
 
+from algorithms.calibration import REAL_CALIB_FILE, load_calibration_file
 from algorithms.calibration.base import CalibrationResult
 
 logger = logging.getLogger(__name__)
-from algorithms.calibration.real_calibration import load_calibration
 from algorithms.grasp.executor import RealArmExecutor
 from algorithms.grasp.planner import GraspConfig, GraspPlanner
 from algorithms.kinematics.real_d1_ik import D1Kinematics
@@ -88,11 +88,14 @@ def init_all(
     detector = YOLODetector(_camera, classes=_yolo_classes, conf=0.3)
 
     print("[real_task] 加载标定...", flush=True)
-    calib_path = os.environ.get(
-        "CALIB_PATH",
-        str(_PROJECT_ROOT / "output" / "calibration_result.json"),
-    )
-    calibration = load_calibration(calib_path if os.path.exists(calib_path) else None)
+    calib_path = os.environ.get("CALIB_PATH", REAL_CALIB_FILE)
+    try:
+        calibration = load_calibration_file(calib_path)
+        print(f"  标定已加载: {calib_path} (method={calibration.method})", flush=True)
+    except FileNotFoundError:
+        logger.warning("标定文件不存在: %s — 使用几何估算 fallback", calib_path)
+        from algorithms.calibration.real_calibration import load_calibration
+        calibration = load_calibration(None)
 
     kinematics = D1Kinematics()
 

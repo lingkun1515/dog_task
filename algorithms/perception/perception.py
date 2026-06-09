@@ -444,7 +444,9 @@ class SimObjectDetector(ObjectDetector):
         return detections
 
     def _world_to_cam(self, world_pos: np.ndarray) -> np.ndarray:
-        """世界坐标 → 相机坐标（用于 xpos 兜底）。"""
+        """世界坐标 → OpenCV 相机坐标（X 右、Y 下、Z 前）。"""
         cam_xpos = self._data.cam_xpos[self._cam_id]
         cam_xmat = self._data.cam_xmat[self._cam_id].reshape(3, 3)
-        return cam_xmat.T @ (world_pos - cam_xpos)
+        pos_mj = cam_xmat.T @ (world_pos - cam_xpos)
+        # MuJoCo cam (X right, Y up, Z back) → OpenCV cam (X right, Y down, Z forward)
+        return np.array([pos_mj[0], -pos_mj[1], -pos_mj[2]])

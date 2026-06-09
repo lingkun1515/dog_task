@@ -21,7 +21,7 @@ def _deproject_from_df(cx: float, cy: float, depth_frame, intrinsics: dict):
     y = (cy - intrinsics["cy"]) / intrinsics["fy"] * d
     return (x, y, d)
 
-OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "output")
+OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 
 # 物理约束基础旋转矩阵（cam_X→arm_-X, cam_Y→arm_-Z, cam_Z→arm_-Y）
 _R_BASE = np.array([
@@ -257,7 +257,3 @@ def load_calibration(calib_path: str | None = None) -> CalibrationResult:
     T[:3, 3] = t
     print("  使用几何估算变换")
     return CalibrationResult(T_cam_to_arm=T, method="geometric_estimate")
-
-
-# 延迟导入
-from execution.real_robots.camera import RealSenseCamera  # noqa: E402

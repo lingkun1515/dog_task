@@ -11,6 +11,7 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+from algorithms.calibration import SIM_CALIB_FILE, load_calibration_file
 from algorithms.calibration.sim_calibration import create_sim_calibration
 from algorithms.grasp.executor import SimArmExecutor
 from algorithms.grasp.planner import GraspConfig, GraspPlanner, GraspState as PlannerState
@@ -134,12 +135,17 @@ class SimulationScene:
                 qpos_arm_slice=slice(19, 25),
             )
 
-        calibration = create_sim_calibration(
-            model=self.robot.model,
-            data=self.robot.data,
-            camera_name="front_cam",
-            arm_base_body_name=arm_base_body,
-        )
+        try:
+            calibration = load_calibration_file(SIM_CALIB_FILE)
+            logger.info("仿真标定已从文件加载 (method=%s)", calibration.method)
+        except FileNotFoundError:
+            calibration = create_sim_calibration(
+                model=self.robot.model,
+                data=self.robot.data,
+                camera_name="front_cam",
+                arm_base_body_name=arm_base_body,
+            )
+            logger.info("仿真标定已计算并保存到 %s", SIM_CALIB_FILE)
         executor = SimArmExecutor(self.robot)
 
         grasp_config = GraspConfig(
