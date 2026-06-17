@@ -51,9 +51,9 @@ class SimArmExecutor(ArmExecutor):
         time.sleep(wait_time)
 
     def set_gripper(self, angle: float) -> None:
-        # MuJoCo 仿真中的夹爪是 PD 控制的最后一段
-        # 目前在仿真中通过 PD target 的第 6 位驱动（如果有夹爪 DOF）
-        pass
+        # Sim gripper: angle=0 means closed, angle=65 means open.
+        # When closed, signal RobotSim to force ball to TCP position.
+        self._robot._gripper_closed = (angle <= 10.0)
 
     def get_current_joints(self) -> list[float]:
         q = self._robot.data.qpos[self._arm_qpos_slice]

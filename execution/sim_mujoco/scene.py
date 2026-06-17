@@ -158,6 +158,7 @@ class SimulationScene:
             safe_park=algo_cfg.get("safe_park_angles", [0.0, 1.0, -0.8, 0.0, -0.3, 0.0]),
             move_wait=algo_cfg.get("move_wait", 2.0),
             gripper_wait=algo_cfg.get("gripper_wait", 0.5),
+            max_attempts=algo_cfg.get("max_attempts", 3),
         )
         self._algo_planner = GraspPlanner(
             kinematics=kinematics,
@@ -371,6 +372,8 @@ class SimulationScene:
 
             # Physics step
             self.robot.step()
+            # Apply gripper constraint (ball follows TCP when gripper closed)
+            self.robot.apply_gripper_constraint()
             step_counter += 1
 
             next_wake += physics_dt

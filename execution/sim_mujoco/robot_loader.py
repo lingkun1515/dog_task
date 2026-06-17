@@ -22,6 +22,11 @@ def load_config(config_path: str | None = None) -> dict:
     path = Path(config_path)
     if not path.is_absolute():
         path = _PROJECT_ROOT / path
+    # Support robot_id shorthand: try config/robots/<id>.toml
+    if not path.exists() and path.suffix == "":
+        candidate = _PROJECT_ROOT / "config" / "robots" / f"{config_path}.toml"
+        if candidate.exists():
+            path = candidate
 
     if path.suffix == ".toml":
         try:
@@ -115,6 +120,22 @@ class RobotSim:
         self._target_dof_pos = self.default_angles.copy()
         self._algo_arm_target: np.ndarray | None = None  # set by algo grasp thread
 
+        # ---- Sim gripper coupling ----
+        self._gripper_closed: bool = False
+        self._grasp_target_body_id = mujoco.mj_name2id(
+            self.model, mujoco.mjtObj.mjOBJ_BODY, "target_sphere"
+        )
+        self._tcp_site_id = mujoco.mj_name2id(
+            self.model, mujoco.mjtObj.mjOBJ_SITE, "d1_tcp"
+        )
+        if self._grasp_target_body_id >= 0:
+            _jnt_id = self.model.body_jntadr[self._grasp_target_body_id]
+            self._ball_qpos_addr: int = int(self.model.jnt_qposadr[_jnt_id])
+            self._ball_qvel_addr: int = int(self.model.jnt_dofadr[_jnt_id])
+        else:
+            self._ball_qpos_addr = -1
+            self._ball_qvel_addr = -1
+
     def reset(self) -> None:
         """Reset simulation to initial state."""
         mujoco.mj_resetData(self.model, self.data)
@@ -122,6 +143,7 @@ class RobotSim:
         self._step_counter = 0
         self._target_dof_pos = self.default_angles.copy()
         self._algo_arm_target = None
+        self._gripper_closed = False
 
     def step(self) -> None:
         """Run one physics step with PD control."""
@@ -185,3 +207,14 @@ class RobotSim:
     def joint_velocities(self) -> np.ndarray:
         v_end = self._qvel_start + self._n_actuated
         return self.data.qvel[self._qvel_start : v_end].copy()
+    def apply_gripper_constraint(self) -> None:
+        """When gripper is closed, force ball qpos to TCP site position and zero ball velocity."""
+        if not self._gripper_closed:
+            return
+        if self._grasp_target_body_id < 0 or self._tcp_site_id < 0:
+            return
+        tcp_pos = self.data.site_xpos[self._tcp_site_id].copy()
+        addr = self._ball_qpos_addr
+        self.data.qpos[addr : addr + 3] = tcp_pos
+        vaddr = self._ball_qvel_addr
+        self.data.qvel[vaddr : vaddr + 6] = 0.0
