@@ -52,7 +52,7 @@ class GraspConfig:
     z_overshoot: float = 0.02           # 下降过冲（米）
     lift_height: float = 0.15           # 提起高度（米）
     safe_park: list[float] = field(default_factory=lambda: [-90, 30, -10, 0, 0, 0])
-    max_attempts: int = 1               # 最多重试次数
+    max_attempts: int = 3               # 最多重试次数（IK失败时坐下重新检测再抓取）
     move_wait: float = 2.0              # 移动后等待时间（秒）
     gripper_wait: float = 0.5           # 夹爪动作等待时间（秒）
 
@@ -135,18 +135,22 @@ class GraspPlanner:
                     time.sleep(0.1)
 
             if not all_dets:
-                if attempt == 0:
-                    self._set_error("no_target", "未检测到目标")
-                    return self._last_result
-                break
+                if attempt < cfg.max_attempts - 1:
+                    logger.warning("未检测到目标 (attempt %d/%d)，重试", attempt + 1, cfg.max_attempts)
+                    time.sleep(1.0)
+                    continue
+                self._set_error("no_target", "未检测到目标（重试%d次后放弃）" % cfg.max_attempts)
+                return self._last_result
 
             # 选最近目标
             best = self._pick_best_target(all_dets)
             if best is None:
-                if attempt == 0:
-                    self._set_error("no_reachable", "无可达目标")
-                    return self._last_result
-                break
+                if attempt < cfg.max_attempts - 1:
+                    logger.warning("无可达目标 (attempt %d/%d)，重试", attempt + 1, cfg.max_attempts)
+                    time.sleep(1.0)
+                    continue
+                self._set_error("no_reachable", "无可达目标（重试%d次后放弃）" % cfg.max_attempts)
+                return self._last_result
 
             logger.info("检测到 %s conf=%.2f pixel=(%d,%d) depth=%.3fm",
                        best.label, best.confidence, best.center_pixel[0], best.center_pixel[1], best.depth_m)
@@ -155,7 +159,11 @@ class GraspPlanner:
             # Sim/Real 统一路径：Detection.position_cam → CalibrationResult.cam_to_arm()
             target_arm = self._transform_to_arm(best)
             if target_arm is None:
-                self._set_error("transform_failed", "坐标变换失败")
+                if attempt < cfg.max_attempts - 1:
+                    logger.warning("坐标变换失败 (attempt %d/%d)，重试", attempt + 1, cfg.max_attempts)
+                    time.sleep(1.0)
+                    continue
+                self._set_error("transform_failed", "坐标变换失败（重试%d次后放弃）" % cfg.max_attempts)
                 return self._last_result
 
             logger.info("arm 坐标: (%.4f, %.4f, %.4f)", target_arm[0], target_arm[1], target_arm[2])
@@ -172,10 +180,13 @@ class GraspPlanner:
             above = np.array([target_arm[0], target_arm[1], target_arm[2] + cfg.approach_height])
             ik_above = self._solve_ik(above)
             if ik_above is None:
-                if attempt == 0:
-                    self._set_error("ik_failed", "IK 无法到达目标上方")
-                    return self._last_result
-                break
+                logger.warning("IK 无法到达目标上方 (attempt %d/%d)，坐下重新定位", attempt + 1, cfg.max_attempts)
+                self._executor.move_to_joints(cfg.safe_park + [cfg.gripper_open], mode=1, wait_time=cfg.move_wait)
+                time.sleep(1.0)
+                if attempt < cfg.max_attempts - 1:
+                    continue
+                self._set_error("ik_failed", "IK 无法到达目标上方（重试%d次后放弃）" % cfg.max_attempts)
+                return self._last_result
 
             fk_world = np.array(self._kinematics.get_position(ik_above))
             fk_arm = fk_world - np.array(self._kinematics.arm_base_world_pos)

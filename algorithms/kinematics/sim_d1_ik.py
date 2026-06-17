@@ -64,8 +64,8 @@ class SimD1Kinematics(ArmKinematics):
         self,
         target_xyz,
         initial_angles_deg=None,
-        max_iter: int = 200,
-        tol: float = 0.001,
+        max_iter: int = 400,
+        tol: float = 0.003,
         alpha: float = 0.5,
     ) -> list[float] | None:
         """IK：target_xyz 在 arm base 坐标系中。返回关节角度（度）。"""

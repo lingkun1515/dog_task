@@ -146,8 +146,8 @@ class D1Kinematics:
         return positions
 
     @staticmethod
-    def inverse_kinematics(target_xyz, initial_angles_deg=None, max_iter=200,
-                           tol=0.001, alpha=0.5):
+    def inverse_kinematics(target_xyz, initial_angles_deg=None, max_iter=400,
+                           tol=0.003, alpha=0.5):
         target = np.array(target_xyz)
         if initial_angles_deg is not None:
             q = np.deg2rad(np.array(initial_angles_deg[:6], dtype=float))
