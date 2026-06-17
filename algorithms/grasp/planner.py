@@ -47,6 +47,7 @@ class GraspConfig:
 
     approach_height: float = 0.12       # 目标上方高度（米）
     descend_step: float = 0.015         # 每次下降步长（米）
+    descend_ik_tol: float = 0.005       # 下降阶段 IK 容差（米），比默认 3mm 宽松
     gripper_open: float = 65            # 夹爪张开角度
     gripper_close: float = 0            # 夹爪闭合角度
     z_overshoot: float = 0.02           # 下降过冲（米）
@@ -179,6 +180,15 @@ class GraspPlanner:
             # === 4. IK 目标上方 ===
             above = np.array([target_arm[0], target_arm[1], target_arm[2] + cfg.approach_height])
             ik_above = self._solve_ik(above)
+            # 兜底：exact approach_height 失败时，用更大的高度再试
+            if ik_above is None:
+                for fallback_h in [0.18, 0.25]:
+                    above_fb = np.array([target_arm[0], target_arm[1], target_arm[2] + fallback_h])
+                    ik_above = self._solve_ik(above_fb)
+                    if ik_above is not None:
+                        above = above_fb
+                        logger.info("IK fallback: approach_height=%.2fm 成功", fallback_h)
+                        break
             if ik_above is None:
                 logger.warning("IK 无法到达目标上方 (attempt %d/%d)，坐下重新定位", attempt + 1, cfg.max_attempts)
                 self._executor.move_to_joints(cfg.safe_park + [cfg.gripper_open], mode=1, wait_time=cfg.move_wait)
@@ -212,9 +222,16 @@ class GraspPlanner:
 
                 self._status_msg = f"descending step={step} z={current_z:.3f}"
                 tp = [target_arm[0], target_arm[1], current_z]
-                ik_step = self._kinematics.inverse_kinematics(tp, initial_angles_deg=prev_ik)
+                ik_step = self._kinematics.inverse_kinematics(
+                    tp, initial_angles_deg=prev_ik, tol=cfg.descend_ik_tol
+                )
                 if ik_step is None:
-                    logger.warning("下降步%d IK 失败，停止下降", step)
+                    # 再用更宽松的容限尝试一次
+                    ik_step = self._kinematics.inverse_kinematics(
+                        tp, initial_angles_deg=prev_ik, tol=0.008
+                    )
+                if ik_step is None:
+                    logger.warning("下降步%d IK 失败 (tol=8mm)，停止下降", step)
                     break
                 self._executor.move_to_joints(ik_step + [cfg.gripper_open], mode=1, wait_time=cfg.move_wait)
                 prev_ik = ik_step
