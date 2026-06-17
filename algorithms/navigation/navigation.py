@@ -40,6 +40,7 @@ class NavigationController:
         self.linear_speed = linear_speed
         self.angular_speed = angular_speed
         self.arrival_threshold = arrival_threshold
+        self._default_arrival_threshold = arrival_threshold
         self.heading_threshold = heading_threshold
 
         self._state = NavState.IDLE
@@ -70,7 +71,9 @@ class NavigationController:
         self._target = np.array([x, y])
         self._require_heading = require_heading
         self._goal_heading = goal_heading
-        if arrival_threshold is not None:
+        if arrival_threshold is None:
+            self.arrival_threshold = self._default_arrival_threshold
+        else:
             self.arrival_threshold = arrival_threshold
         self._state = NavState.MOVE
         self._step_count = 0
@@ -113,7 +116,7 @@ class NavigationController:
         heading_error = target_heading - base_yaw
         heading_error = math.atan2(math.sin(heading_error), math.cos(heading_error))
 
-        # 线速度：远处全速，接近时减速
+        # 线速度：远处全速，接近时按距离线性减速
         vx = min(self.linear_speed, distance * 0.8)
         # 角速度大时适当降低线速度避免绕圈
         if abs(heading_error) > 0.5:
