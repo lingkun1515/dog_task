@@ -202,15 +202,25 @@ class EpisodeAnalyzer:
         elif self.meta.get("final_state", {}).get("nav_state") == "arrived":
             result["return_arrival_error_m"] = 0.0
 
-        # 计算朝向误差
+        # 计算朝向误差（在去程到达点计算，非最终位置）
         headings = [p["yaw"] for p in self.nav_trajectory]
         if self.meta.get("target"):
+            # 使用去程到达点（return_start_idx）而非轨迹末尾（home位置）
+            if return_start_idx is not None and return_start_idx < len(positions):
+                heading_pos = positions[return_start_idx]
+                heading_yaw = headings[return_start_idx]
+            else:
+                # 无返程数据时，找离目标最近的轨迹点
+                target_2d = np.array([self.meta["target"]["x"], self.meta["target"]["y"]])
+                dists = [np.linalg.norm(p[:2] - target_2d) for p in positions]
+                closest_idx = int(np.argmin(dists))
+                heading_pos = positions[closest_idx]
+                heading_yaw = headings[closest_idx]
             target_heading = math.atan2(
-                self.meta["target"]["y"] - positions[-1][1],
-                self.meta["target"]["x"] - positions[-1][0]
+                self.meta["target"]["y"] - heading_pos[1],
+                self.meta["target"]["x"] - heading_pos[0]
             )
-            final_heading = headings[-1]
-            heading_error = abs(final_heading - target_heading)
+            heading_error = abs(heading_yaw - target_heading)
             heading_error = min(heading_error, 2 * math.pi - heading_error)
             result["heading_error_deg"] = math.degrees(heading_error)
 
@@ -268,9 +278,9 @@ class EpisodeAnalyzer:
         if result["grasp_success"]:
             result["lift_success"] = True
 
-        # 计算抓取持续时间
-        if "grasp_start" in phases and "grasp_success" in phases:
-            start_idx = phases.index("grasp_start")
+        # 计算抓取持续时间（从首次 'grasping' 到 'grasp_success'）
+        if "grasping" in phases and "grasp_success" in phases:
+            start_idx = phases.index("grasping")
             success_idx = phases.index("grasp_success")
             result["grasp_duration_s"] = (
                 self.grasp_log[success_idx]["timestamp"] -

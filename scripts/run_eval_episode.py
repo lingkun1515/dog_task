@@ -201,10 +201,10 @@ class EpisodeRunner:
             logger.info("准备返航: 释放夹爪, 收回手臂")
             self.scene.robot._gripper_closed = False
             self.scene.robot._algo_arm_target = None
-            time.sleep(1.5)  # 等待手臂归位 + 球落地稳定
+            time.sleep(3.0)  # 等待手臂归位 + 球落地稳定 + 站立稳定
 
             logger.info("开始返回起点: (%.2f, %.2f)", home_x, home_y)
-            self.scene.navigate_to(home_x, home_y, require_heading=True, goal_heading=0)
+            self.scene.navigate_to(home_x, home_y)
             self._capture_state("return_start")
 
             # 等待返回
