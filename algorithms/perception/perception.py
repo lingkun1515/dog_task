@@ -511,10 +511,12 @@ class SimObjectDetector(ObjectDetector):
             px = int(fx * pos_cam[0] / depth + cxi)
             py = int(fy * pos_cam[1] / depth + cyi)
 
-            if not (0 <= px < img_w and 0 <= py < img_h):
-                logger.debug("[xpos] %s pixel=(%d,%d) 超出图像 %dx%d，跳过",
+            # Sim ground truth: always return detection even if outside camera FOV
+            # (position_cam is valid regardless of pixel projection)
+            outside_fov = not (0 <= px < img_w and 0 <= py < img_h)
+            if outside_fov:
+                logger.debug("[xpos] %s pixel=(%d,%d) 超出图像 %dx%d，sim ground truth 仍返回",
                              label, px, py, img_w, img_h)
-                continue
 
             logger.debug(
                 "[xpos] %s world=(%.3f,%.3f,%.3f) cam_cv=(%.3f,%.3f,%.3f) → pixel=(%d,%d) depth=%.3fm",
