@@ -102,6 +102,8 @@ class SimulationScene:
         self._algo_running = False
         self._detect_enabled = False  # 检测标注开关：仅抓取阶段激活
         self._sim_detector: SimObjectDetector | None = None
+        self._sit_override: np.ndarray | None = None  # sit pose override during grasp
+        self._standing_pose: np.ndarray | None = None
 
         algo_cfg = cfg.get("algorithms")
         if not algo_cfg:
@@ -168,6 +170,24 @@ class SimulationScene:
             config=grasp_config,
         )
         logger.info("算法抓取管线已初始化 (与实机一致)")
+
+        # ---- Sit-down pose for grasp precision ----
+        default_legs = np.array(default_angles[:12], dtype=np.float64)
+        self._standing_pose = default_legs.copy()
+        self._sit_pose = default_legs.copy()
+        # Rear legs fold more (thigh increases, calf more negative)
+        self._sit_pose[6] = 0.0    # RR_hip
+        self._sit_pose[7] = 1.5    # RR_thigh (standing=1.0)
+        self._sit_pose[8] = -2.2   # RR_calf  (standing=-1.5)
+        self._sit_pose[9] = 0.0    # RL_hip
+        self._sit_pose[10] = 1.5   # RL_thigh
+        self._sit_pose[11] = -2.2  # RL_calf
+        # Front legs slightly more bent for stability
+        self._sit_pose[1] = 1.0    # FR_thigh (standing=0.8)
+        self._sit_pose[2] = -1.7   # FR_calf  (standing=-1.5)
+        self._sit_pose[4] = 1.0    # FL_thigh
+        self._sit_pose[5] = -1.7   # FL_calf
+        logger.info("坐下姿态已配置")
 
         # ---- keyboard teleop (only in GUI mode) ----
         self._kb_controller = None
@@ -330,8 +350,9 @@ class SimulationScene:
                     # RL 不控制手臂时，强制保持默认收缩姿态
                     if not self._arm_rl_enabled:
                         self.robot._target_dof_pos[12:18] = self.robot.default_angles[12:18]
-                    if not self._arm_rl_enabled:
-                        self.robot._target_dof_pos[12:18] = self.robot.default_angles[12:18]
+                    # Sit-down override: replace leg targets during grasp
+                    if self._sit_override is not None:
+                        self.robot._target_dof_pos[0:12] = self._sit_override
                 else:
                     yaw = self.robot.base_yaw
                     c = np.cos(yaw)
@@ -407,9 +428,15 @@ class SimulationScene:
         logger.info("启动算法抓取")
         self._detect_enabled = True
         self._algo_running = True
+        # Sit down to improve grasp precision
+        self._sit_override = self._sit_pose.copy()
 
         def _run():
             try:
+                # Wait for sit-down stability (PD convergence)
+                logger.info("等待坐下稳定...")
+                time.sleep(2.5)
+                logger.info("坐下完成，开始抓取流程（含重新检测）")
                 self._algo_planner.execute_full_cycle()
                 logger.info("算法抓取完成: state=%s", self._algo_planner.state.value)
             except Exception as e:
@@ -417,6 +444,9 @@ class SimulationScene:
             finally:
                 self._algo_running = False
                 self._detect_enabled = False
+                # Restore standing pose
+                self._sit_override = None
+                logger.info("抓取结束，恢复站立姿态")
 
         self._algo_thread = threading.Thread(target=_run, daemon=True)
         self._algo_thread.start()
