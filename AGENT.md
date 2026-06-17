@@ -226,6 +226,12 @@ AI Agent 自主执行：
 - 物理参数精确匹配（摩擦、质量分布）— 先保证行为一致，再精调物理
 - 渲染质量 — 评估用低分辨率即可，交付用高分辨率
 
+### 关键发现：朝向对齐
+
+- **纯原地旋转**：`start_heading_align()` 不可使用 `navigate_to(require_heading=True)`，后者 min_steps=20 期间机器人会向前蠕动，导致坐在球上方、相机无法检测。
+- **实现要点**：`_step_count=999` 跳过 min_steps，`arrival_threshold+=1.0` 阻止距离到达判定，`_state=MOVE` 确保 update() 不 early-return。
+- **对齐精度**：heading 误差 <2.5°（实测 0.02°、2.11°、0.65°），满足 PR1 验收标准（<15°）。
+
 ---
 
 ## 六、子 Agent 并行分工
@@ -289,7 +295,6 @@ python -m scripts.video_review --video logs/eval_episodes/<latest>/third_person.
 ## 九、已知问题与待解决
 
 - **IK 下降步0 失败**：每轮都出现。球体在 arm frame z≈-0.35m，above 位置 z≈-0.23m (IK 成功)，但下降 15mm 到 z≈-0.25m 时 IK 误差 16.9mm 超过 tol×5=15mm 容限。根因：IK tol=3mm 在工作空间边界太严格。当前靠 gripper constraint 兜底。修复方向：下降阶段放宽 IK tol 至 5-8mm。
-- **朝向误差 32°**：到达目标时机器人朝向球体而非正北，不影响抓取但路径不完美。
 - **视频录制未启用**：`--record-video` 未使用，不影响迭代。
 
 ---
@@ -305,6 +310,7 @@ python -m scripts.video_review --video logs/eval_episodes/<latest>/third_person.
 | nav_angular_speed | 0.8 rad/s | 0.5-1.2 | 转弯速度 |
 | return require_heading | **禁用** | — | RL policy 无法收敛 <0.1rad，返航不要求朝向 |
 | return arrival_threshold | 0.5m (默认) | 0.3-1.0 | 不要设 1.5m，会导致提前停止 |
+| heading_align_timeout | 8s | 5-12 | 到达后原地旋转对齐朝向的超时时间 |
 
 ### 球体参数
 
@@ -329,7 +335,7 @@ python -m scripts.video_review --video logs/eval_episodes/<latest>/third_person.
 
 | 参数 | 当前值 | 经验范围 | 说明 |
 |------|--------|---------|------|
-| approach_height | 0.12m | 0.08-0.15 | 过小会导致 above 位置也在 IK 边界 |
+| approach_height | 0.18m | 0.15-0.25 | 过小会导致 above 位置也在 IK 边界 |
 | descend_step | 0.015m | 0.01-0.03 | 每次下降步长 |
 | move_wait | 0.6s | 0.3-1.0 | 机械臂每步等待时间 |
 | IK tol | 3mm (default) | 3-8mm | 下降阶段应放宽到 5-8mm，边界处 3mm 太严格 |
