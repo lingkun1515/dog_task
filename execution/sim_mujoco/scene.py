@@ -169,6 +169,8 @@ class SimulationScene:
             executor=executor,
             config=grasp_config,
         )
+        # Wire up reposition callback for IK failure recovery
+        self._algo_planner.reposition_fn = self._reposition_for_grasp
         logger.info("算法抓取管线已初始化 (与实机一致)")
 
         # ---- Sit-down pose for grasp precision ----
@@ -460,6 +462,16 @@ class SimulationScene:
     def cancel_grasp(self) -> None:
         self._algo_running = False
         self._refresh_snapshot()
+
+    def _reposition_for_grasp(self) -> None:
+        """Stand up → wait → sit down → wait to change arm-ball geometry on IK failure."""
+        logger.info("[reposition] 站起...")
+        self._sit_override = None
+        time.sleep(2.0)
+        logger.info("[reposition] 再次坐下...")
+        self._sit_override = self._sit_pose.copy()
+        time.sleep(2.5)
+        logger.info("[reposition] 坐下稳定，继续抓取")
 
     def stop_all(self) -> None:
         self.nav.cancel()

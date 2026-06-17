@@ -83,6 +83,7 @@ class GraspPlanner:
         self._state = GraspState.IDLE
         self._status_msg = ""
         self._last_result: dict = {}
+        self.reposition_fn: object = None  # Callable[[], None] | None
 
     # ------------------------------------------------------------------
     # 状态查询
@@ -190,9 +191,14 @@ class GraspPlanner:
                         logger.info("IK fallback: approach_height=%.2fm 成功", fallback_h)
                         break
             if ik_above is None:
-                logger.warning("IK 无法到达目标上方 (attempt %d/%d)，坐下重新定位", attempt + 1, cfg.max_attempts)
+                logger.warning("IK 无法到达目标上方 (attempt %d/%d)，执行重定位", attempt + 1, cfg.max_attempts)
                 self._executor.move_to_joints(cfg.safe_park + [cfg.gripper_open], mode=1, wait_time=cfg.move_wait)
-                time.sleep(1.0)
+                # 站起 → 等待 → 再坐下 → 等待，改变 arm-base 与球的相对位置
+                if self.reposition_fn is not None:
+                    logger.info("执行 reposition: 站起→坐下→重新定位")
+                    self.reposition_fn()
+                else:
+                    time.sleep(1.0)
                 if attempt < cfg.max_attempts - 1:
                     continue
                 self._set_error("ik_failed", "IK 无法到达目标上方（重试%d次后放弃）" % cfg.max_attempts)
