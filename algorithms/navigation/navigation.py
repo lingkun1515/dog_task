@@ -84,6 +84,15 @@ class NavigationController:
         self._step_count = 0
         self._heading_stable_count = 0
 
+    def start_heading_align(self, goal_heading: float) -> None:
+        """Rotate in-place to align heading without forward movement."""
+        self._goal_heading = goal_heading
+        self._require_heading = True
+        self._heading_stable_count = 0
+        self._step_count = 999
+        self.arrival_threshold = self._default_arrival_threshold + 1.0
+        self._state = NavState.MOVE  # Must set MOVE so update() doesn't early-return
+
     def update(
         self, base_pos: np.ndarray, base_yaw: float, dt: float
     ) -> np.ndarray:

@@ -202,15 +202,19 @@ class EpisodeAnalyzer:
         elif self.meta.get("final_state", {}).get("nav_state") == "arrived":
             result["return_arrival_error_m"] = 0.0
 
-        # 计算朝向误差（在去程到达点计算，非最终位置）
+        # 计算朝向误差（优先在 heading_align 阶段测量，其次去程到达点）
         headings = [p["yaw"] for p in self.nav_trajectory]
         if self.meta.get("target"):
-            # 使用去程到达点（return_start_idx）而非轨迹末尾（home位置）
-            if return_start_idx is not None and return_start_idx < len(positions):
+            # 优先使用 heading_align 阶段的最终朝向（反映对齐后的真实精度）
+            heading_align_entries = [e for e in self.fsm_timeline if e["phase"] == "heading_align"]
+            if heading_align_entries:
+                ha = heading_align_entries[-1]
+                heading_pos = np.array(ha["base_pos"])
+                heading_yaw = ha["base_yaw"]
+            elif return_start_idx is not None and return_start_idx < len(positions):
                 heading_pos = positions[return_start_idx]
                 heading_yaw = headings[return_start_idx]
             else:
-                # 无返程数据时，找离目标最近的轨迹点
                 target_2d = np.array([self.meta["target"]["x"], self.meta["target"]["y"]])
                 dists = [np.linalg.norm(p[:2] - target_2d) for p in positions]
                 closest_idx = int(np.argmin(dists))

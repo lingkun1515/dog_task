@@ -162,6 +162,31 @@ class EpisodeRunner:
 
             time.sleep(0.033)  # ~30fps
 
+        # 到达后朝向对齐（纯原地旋转，不前进，避免过近遮挡球体）
+        if self.scene.state["nav_state"].value == "arrived":
+            import math as _math
+            robot_pos = self.scene.state["base_pos"]
+            goal_heading = _math.atan2(target_y - robot_pos[1], target_x - robot_pos[0])
+            logger.info("到达后朝向对齐: goal_heading=%.2f°", _math.degrees(goal_heading))
+            self.scene.start_heading_align(goal_heading)
+            align_start = time.time()
+            ALIGN_TIMEOUT = 8.0
+            while time.time() - align_start < ALIGN_TIMEOUT:
+                align_state = self.scene.state
+                self._capture_state("heading_align")
+                if self.recorder:
+                    self.recorder.capture_frame()
+                if align_state["nav_state"].value == "arrived":
+                    h_err = abs(align_state["base_yaw"] - goal_heading)
+                    h_err = min(h_err, 2 * _math.pi - h_err)
+                    logger.info("朝向对齐完成: heading_error=%.1f°", _math.degrees(h_err))
+                    break
+                time.sleep(0.033)
+            else:
+                h_err = abs(self.scene.state["base_yaw"] - goal_heading)
+                h_err = min(h_err, 2 * _math.pi - h_err)
+                logger.warning("朝向对齐超时 (%.1fs): heading_error=%.1f°, 继续抓取", ALIGN_TIMEOUT, _math.degrees(h_err))
+
         # 到达后启动抓取
         if self.scene.state["nav_state"].value == "arrived":
             logger.info("启动抓取")
@@ -265,7 +290,7 @@ class EpisodeRunner:
         })
 
         # 导航轨迹
-        if phase in ("navigating", "nav_arrived", "returning", "return_arrived"):
+        if phase in ("navigating", "nav_arrived", "heading_align", "returning", "return_arrived"):
             self.nav_trajectory.append({
                 "timestamp": timestamp,
                 "position": state["base_pos"],

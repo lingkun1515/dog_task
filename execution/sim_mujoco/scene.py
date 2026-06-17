@@ -153,7 +153,7 @@ class SimulationScene:
         executor = SimArmExecutor(self.robot)
 
         grasp_config = GraspConfig(
-            approach_height=algo_cfg.get("approach_height", 0.12),
+            approach_height=algo_cfg.get("approach_height", 0.18),
             descend_step=algo_cfg.get("descend_step", 0.015),
             gripper_open=algo_cfg.get("gripper_open", 65),
             gripper_close=algo_cfg.get("gripper_close", 0),
@@ -411,6 +411,11 @@ class SimulationScene:
 
     def cancel_navigation(self) -> None:
         self.nav.cancel()
+        self._refresh_snapshot()
+
+    def start_heading_align(self, goal_heading: float) -> None:
+        """Pure in-place heading alignment (no forward movement)."""
+        self.nav.start_heading_align(goal_heading)
         self._refresh_snapshot()
 
     def enable_detect(self) -> None:
