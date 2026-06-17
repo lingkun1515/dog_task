@@ -45,7 +45,7 @@ class GraspState(Enum):
 class GraspConfig:
     """抓取参数。"""
 
-    approach_height: float = 0.12       # 目标上方高度（米）
+    approach_height: float = 0.18       # 目标上方高度（米）
     descend_step: float = 0.015         # 每次下降步长（米）
     descend_ik_tol: float = 0.005       # 下降阶段 IK 容差（米），比默认 3mm 宽松
     gripper_open: float = 65            # 夹爪张开角度
