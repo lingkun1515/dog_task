@@ -294,7 +294,7 @@ python -m scripts.video_review --video logs/eval_episodes/<latest>/third_person.
 
 ## 九、已知问题与待解决
 
-- **IK 下降步0 失败**：每轮都出现。球体在 arm frame z≈-0.35m，above 位置 z≈-0.23m (IK 成功)，但下降 15mm 到 z≈-0.25m 时 IK 误差 16.9mm 超过 tol×5=15mm 容限。根因：IK tol=3mm 在工作空间边界太严格。当前靠 gripper constraint 兜底。修复方向：下降阶段放宽 IK tol 至 5-8mm。
+- **IK 下降步失败**：每轮都出现（步6-8失败）。球体在 arm frame z≈-0.34m，above 位置 z≈-0.16m (IK 成功)，但下降到 z≈-0.25m 时 IK 误差 40-60mm 超过容限。根因：球在 arm 工作空间边界外。当前靠 gripper constraint 兜底（抓取仍成功）。已实现 reposition_fn：IK above 失败时站起→坐下→重新定位→重试。
 - **视频录制未启用**：`--record-video` 未使用，不影响迭代。
 
 ---
