@@ -36,12 +36,16 @@ class NavigationController:
         angular_speed: float = 0.8,
         arrival_threshold: float = 0.5,
         heading_threshold: float = 0.1,
-    ):
+        fine_threshold: float = 0.08,
+    ) -> None:
         self.linear_speed = linear_speed
         self.angular_speed = angular_speed
         self.arrival_threshold = arrival_threshold
         self._default_arrival_threshold = arrival_threshold
         self.heading_threshold = heading_threshold
+        self.fine_threshold = fine_threshold   # camera-safe distance: stop creeping here
+        self._max_creep_steps = 60
+        self._creep_steps = 0
 
         self._state = NavState.IDLE
         self._target = np.zeros(2)
@@ -78,11 +82,13 @@ class NavigationController:
         self._state = NavState.MOVE
         self._step_count = 0
         self._heading_stable_count = 0
+        self._creep_steps = 0
 
     def cancel(self) -> None:
         self._state = NavState.IDLE
         self._step_count = 0
         self._heading_stable_count = 0
+        self._creep_steps = 0
 
     def start_heading_align(self, goal_heading: float) -> None:
         """Rotate in-place to align heading without forward movement."""
@@ -112,18 +118,25 @@ class NavigationController:
 
         min_steps = 20
 
+        # 行进中：边走边转，不停车
+        target_heading = math.atan2(dy, dx)
+        heading_error = target_heading - base_yaw
+        heading_error = math.atan2(math.sin(heading_error), math.cos(heading_error))
+
         # 到达判定
         if distance < self.arrival_threshold and self._step_count >= min_steps:
+            # Fine approach: creep toward target at reduced speed
+            if distance > self.fine_threshold and self._creep_steps < self._max_creep_steps:
+                self._creep_steps += 1
+                vx = min(0.15, distance * 0.5)
+                vyaw = np.clip(heading_error * 1.5, -0.3, 0.3)
+                self._state = NavState.MOVE
+                return np.array([vx, 0.0, vyaw])
             if not self._require_heading:
                 self._state = NavState.ARRIVED
                 return np.zeros(3)
             # 到达位置后，原地旋转对齐 goal_heading
             return self._align_heading(base_yaw, math.atan2(dy, dx))
-
-        # 行进中：边走边转，不停车
-        target_heading = math.atan2(dy, dx)
-        heading_error = target_heading - base_yaw
-        heading_error = math.atan2(math.sin(heading_error), math.cos(heading_error))
 
         # 线速度：远处全速，接近时按距离线性减速
         vx = min(self.linear_speed, distance * 0.8)

@@ -489,7 +489,8 @@ class SimObjectDetector(ObjectDetector):
     def _detect_from_xpos(self) -> list[Detection]:
         """兜底：直接从 MuJoCo xpos 读取目标位置（上帝视角）。
 
-        只返回在相机视野内的目标（depth>0 且 pixel 在图像内）。
+        Sim ground truth：始终返回检测结果（position_cam 始终有效）。
+        当 depth <= 0（球在相机后方，坐下太近时）仍返回，pixel 用 (-1,-1) 占位。
         """
         img_w = self._intrinsics.get("width", 640)
         img_h = self._intrinsics.get("height", 480)
@@ -505,7 +506,18 @@ class SimObjectDetector(ObjectDetector):
             depth = float(pos_cam[2])
 
             if depth <= 0.01:
-                logger.debug("[xpos] %s 在相机后方 (depth=%.3f)，跳过", label, depth)
+                # 球在相机后方（坐下时离球太近）。Sim ground truth 仍返回，
+                # position_cam 有效（cam_to_arm 刚体变换不受影响），
+                # pixel 用 (-1,-1) 占位（规划器不使用像素坐标）。
+                logger.info("[xpos] %s 在相机后方 (depth=%.3f)，sim ground truth 仍返回", label, depth)
+                detections.append(Detection(
+                    label=label,
+                    center_pixel=(-1, -1),
+                    bbox=(-1, -1, 0, 0),
+                    depth_m=abs(depth) if abs(depth) > 0.001 else 0.001,
+                    position_cam=pos_cam,
+                    confidence=1.0,
+                ))
                 continue
 
             px = int(fx * pos_cam[0] / depth + cxi)
