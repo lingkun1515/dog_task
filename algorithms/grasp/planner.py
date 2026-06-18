@@ -315,6 +315,12 @@ class GraspPlanner:
             [-90, 65, -50, 0, -20, 0],
             [-80, 50, -30, 0, -10, 0],
             [-100, 50, -30, 0, -10, 0],
+            # Downward-reaching seeds (higher j2, deeper j3)
+            [-90, 75, -60, 0, -20, 0],
+            [-90, 80, -70, 0, -25, 0],
+            [-90, 90, -80, 0, -30, 0],
+            [-80, 75, -55, 0, -15, 0],
+            [-100, 75, -55, 0, -15, 0],
         ]
         for init in seeds:
             result = self._kinematics.inverse_kinematics(target_xyz.tolist(), initial_angles_deg=init)
