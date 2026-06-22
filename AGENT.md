@@ -374,7 +374,26 @@ python -m scripts.video_review --video logs/eval_episodes/<latest>/third_person.
 - **修复**：SimulationScene 新增 `_physics_paused` 标志，loop 内 `if not self._physics_paused: self.robot.step()`。configure_scene 暂停期间完成几何重定位，再恢复。
 - **通用价值**：任何需要在主线程修改 sim 状态（reset、scene switch、qpos 注入）的操作都应先置 `_physics_paused=True`。
 
-### 关键发现：任务视频录制（PiP + 检测框）
+### 关键发现：抓取真实性改造（L1 weld + L2 物理夹爪）
+
+**三层抓取架构（L1→L2→L1兜底 混合）：**
+
+- **L0（旧，已弃用）**：`apply_gripper_constraint` 硬设球 qpos = TCP 位置 + 清零速度。「上帝绑定」，球完全无物理。
+- **L1（weld 软约束）**：MuJoCo `weld` equality 把球绑定到 d1_link6。球通过物理约束跟随 TCP，松手停用 weld 后球自由下落。eq_data 布局 `[anchor(3), relquat(4)=(0,0,0,1), relpos(3)]`。
+- **L2（物理手指）**：两根手指加 slide joint（沿 link6 局部 X 轴开合）+ box 碰撞几何（高摩擦）+ motor。闭合时手指 motor 施加内向力矩，靠摩擦接触夹球。
+- **L2+L1 混合（当前生产）**：闭合时优先物理接触；若 300 步内接触未发生（IK 没到位），激活 weld 兜底。张开时停用 weld + 手指外扩，球下落。
+
+**L2 关键参数：**
+- 手指 body pos：link6 局部 `(-0.00562, ±0.034, 0.0706)`（TCP 两侧）
+- slide joint：range ±0.034m，指间距 0-68mm（D1 实机 66.8mm）
+- 接触面 friction=1.8，solref=0.01
+- 手指 mass=0.01kg（超过 0.05 会破坏手臂平衡导致摔倒）
+- motor ctrlrange=±3 N·m
+
+**已知限制：**
+- 球在 arm 工作空间边界外时 IK 到不了 → 物理接触不发生 → weld 兜底
+- 物理夹取在 IK 精确到位时才真正生效（当前多数情况走 weld 兜底）
+- 手指视觉很小，视频里开合不明显（需近距离视角）
 
 - **设计**：`scripts/record_task_video.py` 独立跑完整 FSM 任务 + 录制。
 - **合成视频**：第三视角（跟踪相机）为主画面，第一视角（front_cam 640×480 原生分辨率）作 PiP 嵌入左上角，叠加与 web `/api/video_feed` 一致的检测框。

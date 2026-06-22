@@ -95,7 +95,19 @@
     <body name="golf_ball_4" pos="100 100 -5"><freejoint/><geom name="golf_geom_4" type="sphere" size="0.018" rgba="0.98 0.98 0.98 1" mass="0.0015"/></body>
 
     <!-- material_drop 场景：红色物料方块（material_drop 场景定位到 home，被抓取→携带→投放） -->
-    <body name="payload_box" pos="100 100 -5"><freejoint/><geom name="payload_geom" type="box" size="0.03 0.03 0.03" rgba="0.85 0.15 0.15 1" mass="0.01"/></body>
+    <body name="payload_box" pos="100 100 -5"><freejoint/><geom name="payload_geom" type="box" size="0.03 0.03 0.03" rgba="0.85 0.15 0.15 1" mass="0.01" contype="0" conaffinity="0"/></body>
+
+    <!-- L3 多目标类型：方块/盒子（杂物场景用）。park 区初始 contype=0 不碰撞，激活时改 -->
+    <body name="debris_box_0" pos="100 100 -5"><freejoint/><geom name="debris_box_geom_0" type="box" size="0.025 0.025 0.025" rgba="0.6 0.3 0.1 1" mass="0.008" contype="0" conaffinity="0"/></body>
+    <body name="debris_box_1" pos="100 100 -5"><freejoint/><geom name="debris_box_geom_1" type="box" size="0.020 0.020 0.020" rgba="0.3 0.3 0.3 1" mass="0.005" contype="0" conaffinity="0"/></body>
+    <body name="debris_box_2" pos="100 100 -5"><freejoint/><geom name="debris_box_geom_2" type="box" size="0.030 0.020 0.015" rgba="0.1 0.5 0.2 1" mass="0.007" contype="0" conaffinity="0"/></body>
+
+    <!-- L3 多目标类型：圆柱/瓶（杂物场景用） -->
+    <body name="debris_bottle_0" pos="100 100 -5"><freejoint/><geom name="debris_bottle_geom_0" type="cylinder" size="0.015 0.050" rgba="0.2 0.6 0.9 1" mass="0.010" contype="0" conaffinity="0"/></body>
+    <body name="debris_bottle_1" pos="100 100 -5"><freejoint/><geom name="debris_bottle_geom_1" type="cylinder" size="0.012 0.040" rgba="0.9 0.2 0.3 1" mass="0.008" contype="0" conaffinity="0"/></body>
+
+    <!-- L3 多目标类型：袋装/软体（用 capsule 近似，模拟垃圾袋） -->
+    <body name="debris_bag_0" pos="100 100 -5"><freejoint/><geom name="debris_bag_geom_0" type="capsule" fromto="0 0 0 0 0 0.04" size="0.022" rgba="0.5 0.4 0.3 1" mass="0.006" contype="0" conaffinity="0"/></body>
 
     <!-- rain_inspect 场景：3 个深蓝「积水」标记（静态贴地，仅巡检演示用） -->
     <body name="puddle_0" pos="12.0 0.0 0.012"><geom name="puddle_geom_0" type="cylinder" size="0.10 0.005" rgba="0.10 0.20 0.55 0.70"/></body>
@@ -104,13 +116,14 @@
   </worldbody>
 
   <!-- ============================================================ -->
-  <!-- 抓取约束：weld equality（L1 软约束）                          -->
-  <!-- 把 target_sphere 绑定到 d1_link6（TCP 所在 body）。默认 inactive，-->
-  <!-- 夹爪闭合时运行时激活；松开时停用，球自由下落。                -->
+  <!-- 抓取约束：单个 weld equality（运行时动态重绑定到当前目标体）   -->
+  <!-- L1 软约束 / L2 兜底。默认 inactive + 绑定 target_sphere。       -->
+  <!-- 抓取时 robot_loader 把 eq_obj1id 改为当前目标 body + 激活。    -->
+  <!-- 单 weld 避免多 weld 预计算 Jacobian 导致 segfault（L3 教训）。 -->
   <!-- ============================================================ -->
   <equality>
     <weld name="grasp_weld" body1="target_sphere" body2="d1_link6"
-          anchor="-0.00562 0.0 0.0706" active="false"
-          solref="0.005 1" solimp="0.99 0.999 0.001"/>
+          anchor="0 0 0" active="false"
+          solref="0.002 1" solimp="0.999 0.9999 0.0001"/>
   </equality>
 </mujoco>

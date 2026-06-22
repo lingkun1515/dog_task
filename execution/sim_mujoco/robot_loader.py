@@ -147,8 +147,8 @@ class RobotSim:
             self._finger_r_qpos_addr = -1
 
         # ---- Sim gripper coupling ----
-        # L1 改造：用 MuJoCo weld equality 替换硬 qpos 绑定。
-        # 夹爪闭合时激活 weld（球通过物理约束跟随 TCP，松手会掉落）。
+        # _grasp_target_body_id: 当前抓取目标 body（运行时可改，支持多类型目标）。
+        # weld 会动态重绑定到这个 body。
         self._gripper_closed: bool = False
         self._grasp_target_body_id = mujoco.mj_name2id(
             self.model, mujoco.mjtObj.mjOBJ_BODY, "target_sphere"
@@ -165,6 +165,7 @@ class RobotSim:
             self._ball_qvel_addr = -1
 
         # weld equality 索引（L1 软约束 / L2 兜底）
+        # 单 weld 设计：运行时动态重绑定 eq_obj1id 到当前目标体（避免多 weld segfault）
         self._grasp_weld_id = mujoco.mj_name2id(
             self.model, mujoco.mjtObj.mjOBJ_EQUALITY, "grasp_weld"
         )
@@ -295,53 +296,49 @@ class RobotSim:
         self._weld_fallback_counter = 0
 
     def check_grasp_contact_and_fallback(self) -> None:
-        """在 loop 中调用：检查物理接触，若无则延迟激活 weld 兜底。
-
-        L2 物理夹爪可能因 IK 没到位而接触不到球。此时延迟 300 步（~1.5s）
-        后激活 weld，把球绑定到 TCP，保证抓取成功。
-        若物理接触已发生，则不激活 weld（纯物理夹取）。
-        """
+        """loop 中检查物理接触，无接触则延迟激活 weld 兜底（L2→L1 回退）。"""
         if not self._gripper_closed or self._grasp_weld_active:
             return
         if self._grasp_weld_id < 0:
             return
-        # 检查手指是否接触到目标体
+        # 检查手指-目标体物理接触
         has_contact = False
         if self._grasp_target_body_id >= 0:
-            target_geoms = set()
-            # 找目标体的 geom
-            for g in range(self.model.ngeom):
-                if self.model.geom_bodyid[g] == self._grasp_target_body_id:
-                    target_geoms.add(g)
+            target_geoms = {
+                g for g in range(self.model.ngeom)
+                if self.model.geom_bodyid[g] == self._grasp_target_body_id
+            }
             for c in range(self.data.ncon):
                 ct = self.data.contact[c]
                 g1_is_finger = ('finger' in (
                     mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, ct.geom1) or ''))
                 g2_is_finger = ('finger' in (
                     mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, ct.geom2) or ''))
-                if g1_is_finger and ct.geom2 in target_geoms:
+                if (g1_is_finger and ct.geom2 in target_geoms) or \
+                   (g2_is_finger and ct.geom1 in target_geoms):
                     has_contact = True; break
-                if g2_is_finger and ct.geom1 in target_geoms:
-                    has_contact = True; break
-
         if has_contact:
-            # 物理接触已发生，不需要 weld
             self._weld_fallback_counter = 0
         else:
             self._weld_fallback_counter += 1
-            # 延迟 300 步（~1.5s）后激活 weld 兜底
             if self._weld_fallback_counter > 300:
+                # 动态重绑定 weld 到当前目标体
+                self.model.eq_obj1id[self._grasp_weld_id] = self._grasp_target_body_id
                 self._set_weld_relpose_to_current()
                 self.data.eq_active[self._grasp_weld_id] = 1
                 self._grasp_weld_active = True
 
     def _update_grasp_weld(self) -> None:
-        """根据 _gripper_closed 状态激活/停用 weld equality。"""
+        """根据 _gripper_closed 状态激活/停用 weld equality。
+
+        单 weld 动态重绑定：把 eq_obj1id 改为当前 _grasp_target_body_id，
+        然后激活/停用。
+        """
         if self._grasp_weld_id < 0 or self._grasp_target_body_id < 0:
-            return  # 无 weld 定义或无目标体，回退到无约束
+            return
+        # 动态重绑定 weld 的 body1 到当前目标体
+        self.model.eq_obj1id[self._grasp_weld_id] = self._grasp_target_body_id
         if self._gripper_closed:
-            # 激活 weld 前，先把 weld 的 relpose 设为「当前球相对 TCP 的位姿」，
-            # 否则 weld 会把球硬拉到 anchor 默认位置（跳跃）。
             self._set_weld_relpose_to_current()
             self.data.eq_active[self._grasp_weld_id] = 1
         else:

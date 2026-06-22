@@ -26,6 +26,7 @@ from execution.sim_mujoco.task_scenes import (
     SCENE_GOLF_BALL,
     SCENE_LAWN_DEBRIS,
     SCENE_MATERIAL_DROP,
+    SCENE_MIXED_DEBRIS,
     SCENE_RAIN_INSPECT,
     TaskOutcome,
     TaskResult,
@@ -545,7 +546,7 @@ class SimulationScene:
         # 根据场景选择 worker
         if self.task_scene_mgr.requires_inspect:
             worker = self._run_inspect
-        elif self._active_scene == SCENE_GOLF_BALL:
+        elif self._active_scene in (SCENE_GOLF_BALL, SCENE_MIXED_DEBRIS):
             worker = self._run_multi_grasp
         elif self.task_scene_mgr.requires_drop:
             worker = self._run_material_drop
@@ -615,6 +616,12 @@ class SimulationScene:
         for idx in range(total):
             if not active_bodies:
                 break
+            current_body = active_bodies[0]
+            # 更新 robot 的抓取目标体（weld 会动态重绑定到这个 body）
+            import mujoco as _mj
+            bid = _mj.mj_name2id(self.robot.model, _mj.mjtObj.mjOBJ_BODY, current_body)
+            if bid >= 0:
+                self.robot._grasp_target_body_id = bid
             # 缩小感知器目标集
             self._sim_detector.set_targets(active_bodies, active_labels)
             self._algo_planner._state = GS.IDLE

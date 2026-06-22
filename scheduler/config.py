@@ -16,7 +16,9 @@ DEFAULT_EXECUTION_PORT = 8100
 
 
 # 支持的任务场景。前端 <select> 选项与 sim 端 scene loader 共享此枚举。
-SUPPORTED_TASK_SCENES = ("lawn_debris", "golf_ball", "rain_inspect", "material_drop")
+SUPPORTED_TASK_SCENES = (
+    "lawn_debris", "golf_ball", "rain_inspect", "material_drop", "mixed_debris",
+)
 DEFAULT_TASK_SCENE = "lawn_debris"
 
 

@@ -35,8 +35,10 @@ SCENE_LAWN_DEBRIS = "lawn_debris"
 SCENE_GOLF_BALL = "golf_ball"
 SCENE_RAIN_INSPECT = "rain_inspect"
 SCENE_MATERIAL_DROP = "material_drop"
+SCENE_MIXED_DEBRIS = "mixed_debris"  # L3：混合类型目标（球+方块+瓶+袋）
 
-ALL_SCENES = (SCENE_LAWN_DEBRIS, SCENE_GOLF_BALL, SCENE_RAIN_INSPECT, SCENE_MATERIAL_DROP)
+ALL_SCENES = (SCENE_LAWN_DEBRIS, SCENE_GOLF_BALL, SCENE_RAIN_INSPECT,
+              SCENE_MATERIAL_DROP, SCENE_MIXED_DEBRIS)
 
 # 不活跃 body 的统一停放位置（地下远处，相机看不到）
 _PARK_POS = (100.0, 100.0, -5.0)
@@ -115,11 +117,34 @@ def _rain_inspect_specs(target_pos: tuple[float, float, float]) -> list[SceneBod
     return []
 
 
+def _mixed_debris_specs(target_pos: tuple[float, float, float]) -> list[SceneBodySpec]:
+    """mixed_debris: L3 混合类型目标——球 + 方块 + 圆柱 + 袋装。
+
+    布局考量：不同形状需要不同的抓取策略（球=顶部抓，方块=侧面抓，
+    圆柱=侧面抓，袋=任意）。这里统一用紧凑布局（D1 工作空间内），
+    感知器按 body_name 分类，规划器对所有类型用同一套 IK（靠 weld 兜底）。
+    """
+    cx, cy, _cz = target_pos
+    return [
+        # 球（黄色，单目标）
+        SceneBodySpec(body_name="target_sphere", pos=(cx, cy, 0.04), label="ball"),
+        # 方块（棕色，小积木）
+        SceneBodySpec(body_name="debris_box_0", pos=(cx + 0.10, cy + 0.06, 0.025), label="box"),
+        # 方块（灰色，更小）
+        SceneBodySpec(body_name="debris_box_1", pos=(cx - 0.08, cy + 0.08, 0.020), label="box"),
+        # 圆柱/瓶（蓝色，直立）
+        SceneBodySpec(body_name="debris_bottle_0", pos=(cx + 0.12, cy - 0.07, 0.050), label="bottle"),
+        # 袋装（棕色，capsule 近似）
+        SceneBodySpec(body_name="debris_bag_0", pos=(cx - 0.10, cy - 0.06, 0.022), label="bag"),
+    ]
+
+
 _SCENE_SPEC_BUILDERS = {
     SCENE_LAWN_DEBRIS: _lawn_debris_specs,
     SCENE_GOLF_BALL: _golf_ball_specs,
     SCENE_RAIN_INSPECT: _rain_inspect_specs,
     SCENE_MATERIAL_DROP: _material_drop_specs,
+    SCENE_MIXED_DEBRIS: _mixed_debris_specs,
 }
 
 # 各场景需要从 park 区移出的 body 全集（用于 clear 时统一回 park）
@@ -128,12 +153,19 @@ _SCENE_BODY_REGISTRY = {
     SCENE_GOLF_BALL: [f"golf_ball_{i}" for i in range(5)],
     SCENE_RAIN_INSPECT: ["puddle_0", "puddle_1", "puddle_2"],
     SCENE_MATERIAL_DROP: ["payload_box"],
+    SCENE_MIXED_DEBRIS: [
+        "target_sphere", "debris_box_0", "debris_box_1",
+        "debris_bottle_0", "debris_bag_0",
+    ],
 }
 
 # park 区所有预放置 body（首次初始化时把除 target_sphere 外的全部归位）
 _PARKABLE_BODIES = (
     [f"golf_ball_{i}" for i in range(5)]
     + ["payload_box"]
+    + ["debris_box_0", "debris_box_1", "debris_box_2"]
+    + ["debris_bottle_0", "debris_bottle_1"]
+    + ["debris_bag_0"]
 )
 
 
@@ -182,24 +214,30 @@ class TaskSceneManager:
             return ["payload_box"]
         if self._current_scene == SCENE_RAIN_INSPECT:
             return ["puddle_0", "puddle_1", "puddle_2"]
+        if self._current_scene == SCENE_MIXED_DEBRIS:
+            return ["target_sphere", "debris_box_0", "debris_box_1",
+                    "debris_bottle_0", "debris_bag_0"]
         # 默认 lawn_debris 行为（向后兼容旧调用）
         return ["target_sphere"]
 
     @property
     def target_labels(self) -> list[str]:
-        """检测标签（显示在视频帧上）。"""
+        """检测标签（显示在视频帧上，按形状分类）。"""
         if self._current_scene == SCENE_GOLF_BALL:
             return ["golf"] * 5
         if self._current_scene == SCENE_MATERIAL_DROP:
             return ["payload"]
         if self._current_scene == SCENE_RAIN_INSPECT:
             return ["puddle"] * 3
+        if self._current_scene == SCENE_MIXED_DEBRIS:
+            # 按形状分类标签（球/方块/圆柱/袋）
+            return ["ball", "box", "box", "bottle", "bag"]
         return ["ball"]  # lawn_debris & default
 
     @property
     def requires_grasp(self) -> bool:
-        """该场景是否走标准抓取管线（lawn_debris / golf_ball）。"""
-        return self._current_scene in (SCENE_LAWN_DEBRIS, SCENE_GOLF_BALL)
+        """该场景是否走标准抓取管线（lawn_debris / golf_ball / mixed_debris）。"""
+        return self._current_scene in (SCENE_LAWN_DEBRIS, SCENE_GOLF_BALL, SCENE_MIXED_DEBRIS)
 
     @property
     def requires_drop(self) -> bool:
@@ -251,9 +289,10 @@ class TaskSceneManager:
 
         self._current_scene = scene
 
-        # 应用 specs：把每个 body 写入指定 qpos
+        # 应用 specs：把每个 body 写入指定 qpos + 开启碰撞
         for spec in specs:
-            self._relocate_body(spec.body_name, spec.pos, spec.quat)
+            self._relocate_body(spec.body_name, spec.pos, spec.quat,
+                               enable_collision=True)
 
         # mj_forward 让世界坐标系更新（xpos 反映新位置）
         mujoco.mj_forward(self._model, self._data)
@@ -265,9 +304,9 @@ class TaskSceneManager:
         return specs
 
     def park_all_bodies(self) -> None:
-        """把所有预放置 body 归位到 park 区（为下一次 setup 准备）。"""
+        """把所有预放置 body 归位到 park 区 + 关闭碰撞（为下一次 setup 准备）。"""
         for name in _PARKABLE_BODIES:
-            self._relocate_body(name, _PARK_POS, _PARK_QUAT)
+            self._relocate_body(name, _PARK_POS, _PARK_QUAT, enable_collision=False)
         # target_sphere 归位只在切换非 lawn_debris 场景时执行（由 setup 重新放置）
         # 这里不归位 target_sphere，因为 lawn_debris 是默认场景
         mujoco.mj_forward(self._model, self._data)
@@ -277,11 +316,28 @@ class TaskSceneManager:
         body_name: str,
         pos: tuple[float, float, float],
         quat: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0),
+        enable_collision: bool = True,
     ) -> None:
-        """写入 body 的 qpos（freejoint）以重定位。"""
+        """写入 body 的 qpos（freejoint）以重定位，并控制碰撞开关。
+
+        enable_collision=True 时设 contype/conaffinity=1（参与碰撞）；
+        False 时设 0（park 区不碰撞，避免干扰物理）。
+        """
+        import mujoco as _mj
+        bid = _mj.mj_name2id(self._model, _mj.mjtObj.mjOBJ_BODY, body_name)
+        if bid < 0:
+            return
+        # 碰撞开关：遍历该 body 的 geom
+        geoms_start = self._model.body_geomadr[bid]
+        geoms_count = self._model.body_geomnum[bid]
+        for i in range(geoms_count):
+            gid = geoms_start + i
+            self._model.geom_contype[gid] = 1 if enable_collision else 0
+            self._model.geom_conaffinity[gid] = 1 if enable_collision else 0
+
         addrs = self._body_qpos_addr.get(body_name)
         if addrs is None:
-            logger.debug("[TaskScene] body %s 不在管理范围内，跳过", body_name)
+            logger.debug("[TaskScene] body %s 不在管理范围内，跳过 qpos", body_name)
             return
         qpos_addr, qvel_addr = addrs
         if qpos_addr < 0:
@@ -298,9 +354,9 @@ class TaskSceneManager:
 
     def reset_to_default(self) -> None:
         """重置为默认 lawn_debris 场景（保持向后兼容）。"""
-        # target_sphere 已在 MJCF 初始位置，park 其它 body
+        # target_sphere 已在 MJCF 初始位置，park 其它 body（关闭碰撞）
         for name in _PARKABLE_BODIES:
-            self._relocate_body(name, _PARK_POS, _PARK_QUAT)
+            self._relocate_body(name, _PARK_POS, _PARK_QUAT, enable_collision=False)
         self._current_scene = SCENE_LAWN_DEBRIS
         mujoco.mj_forward(self._model, self._data)
         logger.info("[TaskScene] 已重置为默认场景: lawn_debris")

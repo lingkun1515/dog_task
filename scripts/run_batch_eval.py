@@ -33,7 +33,7 @@ from utils.logging import setup_logging
 setup_logging("eval_batch", "logs/eval_batch.log")
 logger = logging.getLogger(__name__)
 
-ALL_SCENES = ("lawn_debris", "golf_ball", "rain_inspect", "material_drop")
+ALL_SCENES = ("lawn_debris", "golf_ball", "rain_inspect", "material_drop", "mixed_debris")
 
 
 def parse_args():

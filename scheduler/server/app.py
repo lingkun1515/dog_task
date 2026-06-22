@@ -374,6 +374,7 @@ INDEX_HTML = """<!DOCTYPE html>
           golf_ball: '高尔夫球回收',
           rain_inspect: '雨后场地巡检',
           material_drop: '养护物料投放',
+          mixed_debris: '混合杂物回收（多类型）',
         },
         // 场景化：派发按钮、单步按钮、关键步骤文案
         sceneDispatch: {
@@ -381,12 +382,14 @@ INDEX_HTML = """<!DOCTYPE html>
           golf_ball: '一键派发高尔夫球回收',
           rain_inspect: '一键派发场地巡检',
           material_drop: '一键派发物料投放',
+          mixed_debris: '一键派发混合杂物回收',
         },
         sceneBtnPick: {
           lawn_debris: '夹垃圾',
           golf_ball: '夹高尔夫球',
           rain_inspect: '执行巡检',
           material_drop: '投放物料',
+          mixed_debris: '回收杂物',
         },
         // 8 步时间线（索引 0-7），按场景覆盖 arm_start / arm_done 两步
         steps: [
@@ -412,6 +415,10 @@ INDEX_HTML = """<!DOCTYPE html>
           material_drop: {
             4: { label: '投放作业', hint: '释放物料到目标' },
             5: { label: '投放完成', hint: '物料已就位' },
+          },
+          mixed_debris: {
+            4: { label: '分类回收', hint: '球/方块/瓶/袋逐个抓取' },
+            5: { label: '杂物入篮', hint: '多类型回收进度' },
           },
         },
         failHint: {
@@ -467,18 +474,21 @@ INDEX_HTML = """<!DOCTYPE html>
           golf_ball: 'Golf ball recovery',
           rain_inspect: 'Post-rain inspection',
           material_drop: 'Material drop',
+          mixed_debris: 'Mixed debris recovery (multi-type)',
         },
         sceneDispatch: {
           lawn_debris: 'Dispatch cleanup task',
           golf_ball: 'Dispatch golf ball recovery',
           rain_inspect: 'Dispatch site inspection',
           material_drop: 'Dispatch material drop',
+          mixed_debris: 'Dispatch mixed debris recovery',
         },
         sceneBtnPick: {
           lawn_debris: 'Pick debris',
           golf_ball: 'Pick golf ball',
           rain_inspect: 'Run inspection',
           material_drop: 'Drop material',
+          mixed_debris: 'Pick debris',
         },
         steps: [
           { label: 'Standby', hint: 'Awaiting dispatch' },
@@ -502,6 +512,10 @@ INDEX_HTML = """<!DOCTYPE html>
           material_drop: {
             4: { label: 'Drop payload', hint: 'Release at target' },
             5: { label: 'Drop complete', hint: 'Payload delivered' },
+          },
+          mixed_debris: {
+            4: { label: 'Sort & recover', hint: 'Ball/box/bottle/bag grasp' },
+            5: { label: 'Debris collected', hint: 'Multi-type progress' },
           },
         },
         failHint: {
@@ -540,6 +554,7 @@ INDEX_HTML = """<!DOCTYPE html>
       { value: 'golf_ball', disabled: false },
       { value: 'rain_inspect', disabled: false },
       { value: 'material_drop', disabled: false },
+      { value: 'mixed_debris', disabled: false },
     ];
 
     let lang = localStorage.getItem('mower_lang') || 'zh';
@@ -1033,7 +1048,7 @@ def run(
     # 任务场景：前端可覆盖 config.task_scene；sim 模式下生效
     active_scene = scene or config.task_scene
     if active_scene not in (
-        "lawn_debris", "golf_ball", "rain_inspect", "material_drop"
+        "lawn_debris", "golf_ball", "rain_inspect", "material_drop", "mixed_debris"
     ):
         return StreamingResponse(
             iter([f'data: {json.dumps({"type": "error", "msg": f"未知场景: {active_scene}"}, ensure_ascii=False)}\n\n']),

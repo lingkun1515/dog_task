@@ -238,7 +238,7 @@ class EpisodeRunner:
             self._capture_state("grasp_start")
 
             # 等待作业完成（超时给多目标场景更长时间）
-            task_timeout = 240.0 if scene == "golf_ball" else 60.0
+            task_timeout = 240.0 if scene in ("golf_ball", "mixed_debris") else 60.0
             grasp_start = time.time()
             task_timed_out = False
             while time.time() - grasp_start < task_timeout:

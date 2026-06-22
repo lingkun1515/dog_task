@@ -49,7 +49,7 @@ import mujoco  # noqa: E402
 import numpy as np  # noqa: E402
 
 VIDEO_OUTPUT_DIR = PROJECT_ROOT / "logs" / "task_videos"
-ALL_SCENES = ("lawn_debris", "golf_ball", "rain_inspect", "material_drop")
+ALL_SCENES = ("lawn_debris", "golf_ball", "rain_inspect", "material_drop", "mixed_debris")
 DEFAULT_FPS = 30
 DEFAULT_WIDTH = 960
 DEFAULT_HEIGHT = 540
