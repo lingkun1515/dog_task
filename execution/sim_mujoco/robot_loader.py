@@ -164,10 +164,12 @@ class RobotSim:
             self._ball_qpos_addr = -1
             self._ball_qvel_addr = -1
 
-        # weld equality 索引（L1 软约束）
+        # weld equality 索引（L1 软约束 / L2 兜底）
         self._grasp_weld_id = mujoco.mj_name2id(
             self.model, mujoco.mjtObj.mjOBJ_EQUALITY, "grasp_weld"
         )
+        self._grasp_weld_active = False
+        self._weld_fallback_counter = 0
 
     def _init_finger_open(self) -> None:
         """把手指 slide joint 初始化到张开位置（range 外扩端）。"""
@@ -190,6 +192,11 @@ class RobotSim:
         # 手指初始化为张开
         if self._has_finger_actuators:
             self._init_finger_open()
+        # 重置 weld 状态
+        self._grasp_weld_active = False
+        self._weld_fallback_counter = 0
+        if self._grasp_weld_id >= 0:
+            self.data.eq_active[self._grasp_weld_id] = 0
 
     def step(self) -> None:
         """Run one physics step with PD control for legs+arm, torque for fingers."""
@@ -267,16 +274,66 @@ class RobotSim:
     def set_gripper(self, angle: float) -> None:
         """控制夹爪开合。angle<=10 视为闭合。
 
-        L2 物理夹爪：闭合时手指 motor 施加内向力矩，靠摩擦接触夹球；
-        张开时手指外扩，球自由下落。
-        L1 weld 兼容：若无 finger actuator（旧模型），回退到 weld equality。
+        混合策略（L2+L1 兜底）：
+        - L2 物理夹爪：手指 motor 施加内向力矩，靠摩擦接触夹球
+        - L1 weld 兜底：若 300 步内物理接触未发生（IK 没到位），
+          自动激活 weld 把球绑定到 TCP（避免抓取失败）
+        张开时：手指外扩 + weld 停用，球自由下落。
         """
         self._gripper_closed = (angle <= 10.0)
-        # L2 物理夹爪：手指力矩由 step() 根据 _gripper_closed 自动施加
-        if self._has_finger_actuators:
-            return  # 物理夹爪，无需 weld
-        # L1 回退：weld equality
-        self._update_grasp_weld()
+        if not self._gripper_closed:
+            # 张开：停用 weld + 手指外扩
+            if self._grasp_weld_id >= 0:
+                self.data.eq_active[self._grasp_weld_id] = 0
+            self._grasp_weld_active = False
+            self._weld_fallback_counter = 0
+            return
+
+        # 闭合：L2 物理夹爪（手指力矩由 step() 施加）
+        # 同时启动 L1 weld 兜底计时器：若物理接触未发生，step() 会激活 weld
+        self._grasp_weld_active = False
+        self._weld_fallback_counter = 0
+
+    def check_grasp_contact_and_fallback(self) -> None:
+        """在 loop 中调用：检查物理接触，若无则延迟激活 weld 兜底。
+
+        L2 物理夹爪可能因 IK 没到位而接触不到球。此时延迟 300 步（~1.5s）
+        后激活 weld，把球绑定到 TCP，保证抓取成功。
+        若物理接触已发生，则不激活 weld（纯物理夹取）。
+        """
+        if not self._gripper_closed or self._grasp_weld_active:
+            return
+        if self._grasp_weld_id < 0:
+            return
+        # 检查手指是否接触到目标体
+        has_contact = False
+        if self._grasp_target_body_id >= 0:
+            target_geoms = set()
+            # 找目标体的 geom
+            for g in range(self.model.ngeom):
+                if self.model.geom_bodyid[g] == self._grasp_target_body_id:
+                    target_geoms.add(g)
+            for c in range(self.data.ncon):
+                ct = self.data.contact[c]
+                g1_is_finger = ('finger' in (
+                    mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, ct.geom1) or ''))
+                g2_is_finger = ('finger' in (
+                    mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, ct.geom2) or ''))
+                if g1_is_finger and ct.geom2 in target_geoms:
+                    has_contact = True; break
+                if g2_is_finger and ct.geom1 in target_geoms:
+                    has_contact = True; break
+
+        if has_contact:
+            # 物理接触已发生，不需要 weld
+            self._weld_fallback_counter = 0
+        else:
+            self._weld_fallback_counter += 1
+            # 延迟 300 步（~1.5s）后激活 weld 兜底
+            if self._weld_fallback_counter > 300:
+                self._set_weld_relpose_to_current()
+                self.data.eq_active[self._grasp_weld_id] = 1
+                self._grasp_weld_active = True
 
     def _update_grasp_weld(self) -> None:
         """根据 _gripper_closed 状态激活/停用 weld equality。"""
@@ -321,9 +378,9 @@ class RobotSim:
         self.model.eq_data[wid][7:10] = rel_pos               # relpos = 球相对 link6
 
     def apply_gripper_constraint(self) -> None:
-        """兼容旧接口：L1 改造后 weld 由 MuJoCo solver 自动求解，本方法为空操作。
+        """兼容旧接口：检查物理接触，无接触时激活 weld 兜底。
 
-        保留是为了不破坏 scene.py 的 _loop 调用链。实际约束由 weld equality
-        在 mj_step 中自动施加。
+        L2 物理夹爪：手指接触球时纯物理夹取（不激活 weld）。
+        若 IK 没到位、接触不发生，延迟激活 weld 把球绑定到 TCP（L1 兜底）。
         """
-        return
+        self.check_grasp_contact_and_fallback()
