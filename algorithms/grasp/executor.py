@@ -52,8 +52,12 @@ class SimArmExecutor(ArmExecutor):
 
     def set_gripper(self, angle: float) -> None:
         # Sim gripper: angle=0 means closed, angle=65 means open.
-        # When closed, signal RobotSim to force ball to TCP position.
-        self._robot._gripper_closed = (angle <= 10.0)
+        # L1 改造：调用 RobotSim.set_gripper 激活/停用 weld equality
+        # （替代旧的硬 qpos 绑定）。
+        if hasattr(self._robot, 'set_gripper'):
+            self._robot.set_gripper(angle)
+        else:
+            self._robot._gripper_closed = (angle <= 10.0)
 
     def get_current_joints(self) -> list[float]:
         q = self._robot.data.qpos[self._arm_qpos_slice]

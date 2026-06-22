@@ -121,6 +121,8 @@ class RobotSim:
         self._algo_arm_target: np.ndarray | None = None  # set by algo grasp thread
 
         # ---- Sim gripper coupling ----
+        # L1 改造：用 MuJoCo weld equality 替换硬 qpos 绑定。
+        # 夹爪闭合时激活 weld（球通过物理约束跟随 TCP，松手会掉落）。
         self._gripper_closed: bool = False
         self._grasp_target_body_id = mujoco.mj_name2id(
             self.model, mujoco.mjtObj.mjOBJ_BODY, "target_sphere"
@@ -135,6 +137,11 @@ class RobotSim:
         else:
             self._ball_qpos_addr = -1
             self._ball_qvel_addr = -1
+
+        # weld equality 索引（L1 软约束）
+        self._grasp_weld_id = mujoco.mj_name2id(
+            self.model, mujoco.mjtObj.mjOBJ_EQUALITY, "grasp_weld"
+        )
 
     def reset(self) -> None:
         """Reset simulation to initial state."""
@@ -207,14 +214,61 @@ class RobotSim:
     def joint_velocities(self) -> np.ndarray:
         v_end = self._qvel_start + self._n_actuated
         return self.data.qvel[self._qvel_start : v_end].copy()
+    def set_gripper(self, angle: float) -> None:
+        """控制夹爪开合。angle<=10 视为闭合（激活 weld 抓取约束）。
+
+        L1 改造：不再用硬 qpos 绑定，改为激活/停用 MuJoCo weld equality。
+        闭合时球通过物理约束跟随 TCP；张开时 weld 停用，球自由下落。
+        """
+        self._gripper_closed = (angle <= 10.0)
+        self._update_grasp_weld()
+
+    def _update_grasp_weld(self) -> None:
+        """根据 _gripper_closed 状态激活/停用 weld equality。"""
+        if self._grasp_weld_id < 0 or self._grasp_target_body_id < 0:
+            return  # 无 weld 定义或无目标体，回退到无约束
+        if self._gripper_closed:
+            # 激活 weld 前，先把 weld 的 relpose 设为「当前球相对 TCP 的位姿」，
+            # 否则 weld 会把球硬拉到 anchor 默认位置（跳跃）。
+            self._set_weld_relpose_to_current()
+            self.data.eq_active[self._grasp_weld_id] = 1
+        else:
+            self.data.eq_active[self._grasp_weld_id] = 0
+
+    def _set_weld_relpose_to_current(self) -> None:
+        """把 weld 的目标相对位姿设为「当前球相对 d1_link6 的位姿」。
+
+        MuJoCo weld eq_data 布局：
+          [0:3]   = anchor（body2 局部坐标的锚点，body1 的对应点要对齐到这里）
+          [3]     = torquescale
+          [4:8]   = relquat（body1 相对 body2 的期望姿态，w,x,y,z 顺序？实际 [3:7]）
+          [7:10]  = relpos（body1 相对 body2 的期望位置，body2 局部）
+          [10]    = torquescale2 (unused)
+
+        实测有效布局：eq_data[0:3]=anchor, eq_data[3:7]=relquat(0,0,0,1),
+        eq_data[7:10]=relpos。
+        """
+        import mujoco as _mj
+        link6_id = _mj.mj_name2id(self.model, _mj.mjtObj.mjOBJ_BODY, "d1_link6")
+        if link6_id < 0:
+            return
+        # 球当前世界位姿
+        ball_pos = self.data.xpos[self._grasp_target_body_id].copy()
+        # d1_link6 世界位姿
+        link6_pos = self.data.xpos[link6_id].copy()
+        link6_mat = self.data.xmat[link6_id].reshape(3, 3).copy()
+        # 球相对 link6 的位置（link6 局部）
+        rel_pos = link6_mat.T @ (ball_pos - link6_pos)
+
+        wid = self._grasp_weld_id
+        self.model.eq_data[wid][0:3] = [0.0, 0.0, 0.0]      # anchor = link6 原点
+        self.model.eq_data[wid][3:7] = [0.0, 0.0, 0.0, 1.0]  # relquat identity
+        self.model.eq_data[wid][7:10] = rel_pos               # relpos = 球相对 link6
+
     def apply_gripper_constraint(self) -> None:
-        """When gripper is closed, force ball qpos to TCP site position and zero ball velocity."""
-        if not self._gripper_closed:
-            return
-        if self._grasp_target_body_id < 0 or self._tcp_site_id < 0:
-            return
-        tcp_pos = self.data.site_xpos[self._tcp_site_id].copy()
-        addr = self._ball_qpos_addr
-        self.data.qpos[addr : addr + 3] = tcp_pos
-        vaddr = self._ball_qvel_addr
-        self.data.qvel[vaddr : vaddr + 6] = 0.0
+        """兼容旧接口：L1 改造后 weld 由 MuJoCo solver 自动求解，本方法为空操作。
+
+        保留是为了不破坏 scene.py 的 _loop 调用链。实际约束由 weld equality
+        在 mj_step 中自动施加。
+        """
+        return

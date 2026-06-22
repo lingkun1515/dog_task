@@ -102,4 +102,15 @@
     <body name="puddle_1" pos="12.3 -0.2 0.012"><geom name="puddle_geom_1" type="cylinder" size="0.08 0.005" rgba="0.10 0.20 0.55 0.70"/></body>
     <body name="puddle_2" pos="11.75 0.3 0.012"><geom name="puddle_geom_2" type="cylinder" size="0.09 0.005" rgba="0.10 0.20 0.55 0.70"/></body>
   </worldbody>
+
+  <!-- ============================================================ -->
+  <!-- 抓取约束：weld equality（L1 软约束）                          -->
+  <!-- 把 target_sphere 绑定到 d1_link6（TCP 所在 body）。默认 inactive，-->
+  <!-- 夹爪闭合时运行时激活；松开时停用，球自由下落。                -->
+  <!-- ============================================================ -->
+  <equality>
+    <weld name="grasp_weld" body1="target_sphere" body2="d1_link6"
+          anchor="-0.00562 0.0 0.0706" active="false"
+          solref="0.005 1" solimp="0.99 0.999 0.001"/>
+  </equality>
 </mujoco>
