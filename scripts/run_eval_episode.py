@@ -32,6 +32,10 @@ def parse_args():
     parser.add_argument("--config", default="sim_go2_d1", help="机器人配置 ID 或 .toml 路径")
     parser.add_argument("--target-x", type=float, default=None, help="导航目标 X 坐标")
     parser.add_argument("--target-y", type=float, default=None, help="导航目标 Y 坐标")
+    parser.add_argument(
+        "--scene", default=None,
+        help="任务场景: lawn_debris / golf_ball / rain_inspect / material_drop",
+    )
     parser.add_argument("--record-video", action="store_true", help="录制视频")
     parser.add_argument("--output-dir", default=None, help="输出目录（默认 logs/eval_episodes/<timestamp>/）")
     parser.add_argument("--max-duration", type=float, default=180.0, help="最大运行时间（秒）")
@@ -109,23 +113,35 @@ class EpisodeRunner:
             return "unknown"
 
     def run_task(self, target_x: float, target_y: float, max_duration: float = 180.0,
-                 home_x: float = 0.0, home_y: float = -10.0):
+                 home_x: float = 0.0, home_y: float = -10.0, scene: str | None = None):
         """运行完整的 FSM 任务。
 
         Args:
             target_x: 导航目标 X
             target_y: 导航目标 Y
             max_duration: 最大运行时间（秒）
+            home_x/home_y: 返航目标
+            scene: 任务场景（lawn_debris/golf_ball/rain_inspect/material_drop）
         """
         import threading
 
         self.start_time = time.time()
         self.episode_meta["target"] = {"x": target_x, "y": target_y}
         self.episode_meta["home"] = {"x": home_x, "y": home_y}
+        if scene:
+            self.episode_meta["scene"] = scene
 
         # 启动仿真
         self.scene.start()
         time.sleep(0.5)  # 等待仿真稳定
+
+        # 激活任务场景（重定位 body + 切换感知器）
+        if scene:
+            try:
+                self.scene.configure_scene(scene, target_x, target_y, home_x, home_y)
+                logger.info("场景已激活: %s", scene)
+            except Exception as e:
+                logger.error("场景激活失败: %s", e)
 
         # 采集初始状态
         self._capture_state("task_start")
@@ -187,16 +203,18 @@ class EpisodeRunner:
                 h_err = min(h_err, 2 * _math.pi - h_err)
                 logger.warning("朝向对齐超时 (%.1fs): heading_error=%.1f°, 继续抓取", ALIGN_TIMEOUT, _math.degrees(h_err))
 
-        # 到达后启动抓取
+        # 到达后启动抓取/作业
         if self.scene.state["nav_state"].value == "arrived":
-            logger.info("启动抓取")
+            logger.info("启动作业 (scene=%s)", scene or "lawn_debris")
             self.scene.enable_detect()
             self.scene.start_grasp()
             self._capture_state("grasp_start")
 
-            # 等待抓取完成
+            # 等待作业完成（超时给多目标场景更长时间）
+            task_timeout = 240.0 if scene == "golf_ball" else 60.0
             grasp_start = time.time()
-            while time.time() - grasp_start < 60.0:
+            task_timed_out = False
+            while time.time() - grasp_start < task_timeout:
                 state = self.scene.state
 
                 # 采集状态
@@ -206,22 +224,60 @@ class EpisodeRunner:
                 if self.recorder:
                     self.recorder.capture_frame()
 
-                # 检查抓取状态
+                # 检查作业是否结束（algo 线程退出）
                 if not self.scene._algo_running:
-                    time.sleep(0.1)  # 等待 planner 状态更新
-                    grasp_state = self.scene._algo_planner.state.value
-                    if grasp_state == "success":
-                        logger.info("抓取成功")
+                    time.sleep(0.2)  # 等待 task_result 更新
+                    state = self.scene.state
+                    task_result = state.get("task_result")
+                    grasp_state = state["grasp_state"]
+                    # 场景化成功判定
+                    scene_ok = False
+                    if task_result:
+                        scene_ok = task_result.get("outcome") in ("success", "partial")
+                    elif grasp_state == "success":
+                        scene_ok = True
+                    if scene_ok:
+                        msg = (task_result or {}).get("message", "作业成功")
+                        logger.info("作业成功: %s", msg)
                         self._capture_state("grasp_success")
                     else:
-                        logger.warning("抓取失败: %s", grasp_state)
+                        logger.warning("作业失败: grasp_state=%s task_result=%s",
+                                      grasp_state, task_result)
                         self._capture_state("grasp_failed")
                     break
 
                 time.sleep(0.033)
+            else:
+                # 作业超时：等待 algo 线程最多 30s 自然完成（避免截断 task_result）
+                task_timed_out = True
+                logger.warning("作业超时 (>%ss)，等待 algo 线程收尾...", task_timeout)
+                drain_start = time.time()
+                while time.time() - drain_start < 30.0:
+                    if not self.scene._algo_running:
+                        time.sleep(0.3)
+                        break
+                    time.sleep(0.5)
+                if self.scene._algo_running:
+                    logger.warning("algo 线程仍在运行，强制停止")
+                    self.scene.stop_all()
+                    time.sleep(0.5)
+                self._capture_state("grasp_failed")
 
-        # 抓取后返回起点
-        if self.scene.state["grasp_state"] == "success":
+        # 判断作业是否成功（场景化）
+        cur_state = self.scene.state
+        task_result = cur_state.get("task_result")
+        task_succeeded = False
+        if task_result:
+            outcome = task_result.get("outcome")
+            # success / partial 都算作业成功（partial = golf_ball 部分回收）
+            task_succeeded = outcome in ("success", "partial")
+        elif cur_state["grasp_state"] == "success":
+            task_succeeded = True
+        if task_timed_out and not task_succeeded:
+            logger.warning("作业超时且无 task_result，标记为失败")
+
+        # 作业成功后返回起点
+        if task_succeeded:
             # 释放夹爪 + 收回手臂，避免约束干扰返航
             logger.info("准备返航: 释放夹爪, 收回手臂")
             self.scene.robot._gripper_closed = False
@@ -263,16 +319,19 @@ class EpisodeRunner:
             "nav_state": final_state["nav_state"].value,
             "grasp_state": final_state["grasp_state"],
             "base_pos": final_state["base_pos"],
+            "task_result": final_state.get("task_result"),
         }
 
-        # 判断任务是否成功
+        # 判断任务是否成功（场景化）
         self.episode_meta["success"] = (
-            final_state["nav_state"].value == "arrived" and
-            final_state["grasp_state"] == "success"
+            task_succeeded and
+            final_state["nav_state"].value == "arrived"
         )
+        self.episode_meta["task_succeeded"] = task_succeeded
 
-        logger.info("Episode 结束: success=%s, duration=%.1fs",
-                    self.episode_meta["success"], self.episode_meta["duration_s"])
+        logger.info("Episode 结束: success=%s, task_succeeded=%s, duration=%.1fs",
+                    self.episode_meta["success"], task_succeeded,
+                    self.episode_meta["duration_s"])
 
     def _capture_state(self, phase: str):
         """采集当前状态。"""
@@ -367,6 +426,7 @@ def main():
     logger.info("DogTaskSim 评估 Episode")
     logger.info("配置: %s", args.config)
     logger.info("目标: (%s, %s)", args.target_x, args.target_y)
+    logger.info("场景: %s", args.scene or "(默认 lawn_debris)")
     logger.info("录制视频: %s", args.record_video)
     logger.info("输出目录: %s", output_dir)
     logger.info("=" * 60)
@@ -385,6 +445,14 @@ def main():
         home_y = config.home_y
         logger.info("从配置读取目标: (%.2f, %.2f), 返航: (%.2f, %.2f)", target_x, target_y, home_x, home_y)
 
+    # 场景：命令行 > 配置 > 默认
+    scene = args.scene
+    if scene is None:
+        from scheduler.config import load_robot_config
+        _cfg_for_scene = load_robot_config(args.config)
+        scene = _cfg_for_scene.task_scene
+    logger.info("使用场景: %s", scene)
+
     # 运行 episode
     runner = EpisodeRunner(args.config, output_dir, args.record_video)
     try:
@@ -393,7 +461,7 @@ def main():
         from scheduler.config import load_robot_config
         _cfg = load_robot_config(args.config)
         runner.run_task(target_x, target_y, args.max_duration,
-                        home_x=_cfg.home_x, home_y=_cfg.home_y)
+                        home_x=_cfg.home_x, home_y=_cfg.home_y, scene=scene)
         runner.save_results()
 
         # 运行分析器

@@ -15,6 +15,11 @@ DEFAULT_GRASP_PATH = "/grasp"
 DEFAULT_EXECUTION_PORT = 8100
 
 
+# 支持的任务场景。前端 <select> 选项与 sim 端 scene loader 共享此枚举。
+SUPPORTED_TASK_SCENES = ("lawn_debris", "golf_ball", "rain_inspect", "material_drop")
+DEFAULT_TASK_SCENE = "lawn_debris"
+
+
 @dataclass(frozen=True)
 class RobotConfig:
     """机器人连接配置，由 config/robots/<编号>.toml 加载。
@@ -36,6 +41,7 @@ class RobotConfig:
     home_x: float = 0.0         # 回程目标 X（充电桩/原点）
     home_y: float = -10.0       # 回程目标 Y
     arrival_threshold: float = 0.5  # 导航到达判定距离
+    task_scene: str = DEFAULT_TASK_SCENE  # 任务场景：lawn_debris/golf_ball/rain_inspect/material_drop
 
     # 实机专用
     arm_host: str = ""
@@ -97,6 +103,11 @@ def load_robot_config(robot_id: str) -> RobotConfig:
         execution_url = data.get("execution_url")
         if not execution_url:
             raise ValueError(f"仿真模式下缺少 execution_url 字段: {config_path}")
+        task_scene = str(data.get("task_scene", DEFAULT_TASK_SCENE))
+        if task_scene not in SUPPORTED_TASK_SCENES:
+            raise ValueError(
+                f"未知 task_scene={task_scene!r}，支持: {list(SUPPORTED_TASK_SCENES)}"
+            )
         return RobotConfig(
             robot_id=robot_id,
             mode="sim",
@@ -106,6 +117,7 @@ def load_robot_config(robot_id: str) -> RobotConfig:
             home_x=float(data.get("home_x", 0.0)),
             home_y=float(data.get("home_y", -10.0)),
             arrival_threshold=float(data.get("arrival_threshold", 0.5)),
+            task_scene=task_scene,
         )
 
     host = data.get("host")
@@ -124,4 +136,5 @@ def load_robot_config(robot_id: str) -> RobotConfig:
         arm_host=str(data.get("arm_host", "")),
         arm_port=int(data.get("arm_port", 8088)),
         calibration_path=str(data.get("calibration_path", "")),
+        task_scene=str(data.get("task_scene", DEFAULT_TASK_SCENE)),
     )

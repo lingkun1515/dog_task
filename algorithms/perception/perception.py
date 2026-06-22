@@ -293,14 +293,11 @@ class SimObjectDetector(ObjectDetector):
         self._labels = labels or target_body_names
         self._cam_id = _mj.mj_name2id(model, _mj.mjtObj.mjOBJ_CAMERA, cam_name)
 
-        # 目标 MuJoCo body ID（xpos 兜底用）
+        # 目标 MuJoCo body ID（xpos 兜底用）— 可通过 set_targets 动态切换
         self._target_body_ids: list[int] = []
         self._target_labels: list[str] = []
-        for i, name in enumerate(target_body_names):
-            bid = _mj.mj_name2id(model, _mj.mjtObj.mjOBJ_BODY, name)
-            if bid >= 0:
-                self._target_body_ids.append(bid)
-                self._target_labels.append(self._labels[i] if i < len(self._labels) else name)
+        self._target_body_names: list[str] = list(target_body_names)
+        self._refresh_target_ids()
 
         # HSV 检测默认配置（红+黄，覆盖常见目标颜色）
         _default_label = self._labels[0] if self._labels else "object"
@@ -320,6 +317,39 @@ class SimObjectDetector(ObjectDetector):
         self._cached_detections: list[Detection] = []
         self._cache_time: float = 0.0
         self._cache_interval: float = 0.5
+
+    # ------------------------------------------------------------------
+    # 动态目标切换（多任务场景切换时由 caller 调用）
+    # ------------------------------------------------------------------
+    def _refresh_target_ids(self) -> None:
+        """根据当前 self._target_body_names 重建 body ID 列表。"""
+        import mujoco as _mj
+        self._target_body_ids = []
+        self._target_labels = []
+        for i, name in enumerate(self._target_body_names):
+            bid = _mj.mj_name2id(self._model, _mj.mjtObj.mjOBJ_BODY, name)
+            if bid >= 0:
+                self._target_body_ids.append(bid)
+                self._target_labels.append(
+                    self._labels[i] if i < len(self._labels) else name
+                )
+            else:
+                logger.warning("[detector] body %r 不在模型中，跳过", name)
+
+    def set_targets(self, body_names: list[str], labels: list[str] | None = None) -> None:
+        """切换感知器跟踪的目标 body（场景切换时调用）。
+
+        Args:
+            body_names: 新的目标 body 名列表
+            labels: 对应标签（与 body_names 等长）；缺省沿用 body 名
+        """
+        self._target_body_names = list(body_names)
+        self._labels = list(labels) if labels is not None else list(body_names)
+        self._refresh_target_ids()
+        # 清除检测缓存，确保下一次 detect 用新目标
+        self._cached_detections = []
+        self._cache_time = 0.0
+        logger.info("[detector] 目标已切换: %s", body_names)
 
     # ------------------------------------------------------------------
     # ObjectDetector 接口

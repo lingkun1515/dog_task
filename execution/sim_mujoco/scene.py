@@ -21,6 +21,16 @@ from algorithms.perception.perception import SimObjectDetector
 from execution.sim_mujoco.camera import SimRGBDCamera
 from execution.sim_mujoco.policy_runner import PolicyRunner
 from execution.sim_mujoco.robot_loader import RobotSim
+from execution.sim_mujoco.task_scenes import (
+    ALL_SCENES,
+    SCENE_GOLF_BALL,
+    SCENE_LAWN_DEBRIS,
+    SCENE_MATERIAL_DROP,
+    SCENE_RAIN_INSPECT,
+    TaskOutcome,
+    TaskResult,
+    TaskSceneManager,
+)
 from execution.sim_mujoco.viewer import PassiveViewer
 
 
@@ -113,6 +123,12 @@ class SimulationScene:
         target_bodies = algo_cfg["target_bodies"]
         target_labels = algo_cfg.get("target_labels", target_bodies)
 
+        # ---- Task scene manager (handles multi-scene geometry) ----
+        self.task_scene_mgr = TaskSceneManager(self.robot.model, self.robot.data)
+        # 默认场景：lawn_debris（保持向后兼容）
+        self.task_scene_mgr.reset_to_default()
+        self._active_scene: str = SCENE_LAWN_DEBRIS
+
         self._sim_detector = SimObjectDetector(
             model=self.robot.model,
             data=self.robot.data,
@@ -195,6 +211,11 @@ class SimulationScene:
         self._kb_controller = None
         self._kb_enabled = False
 
+        # ---- Task execution state ----
+        self._last_task_result: TaskResult | None = None
+        # golf_ball 场景：已回收的目标体（用于 multi-grasp 进度）
+        self._collected_targets: list[str] = []
+
         self._running = False
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
@@ -220,6 +241,11 @@ class SimulationScene:
                 "nav_state": self.nav.state,
                 "nav_target": self.nav._target.tolist(),
                 "grasp_state": gs,
+                "active_scene": self._active_scene,
+                "task_result": (
+                    self._last_task_result.to_dict()
+                    if self._last_task_result is not None else None
+                ),
             }
 
     @property
@@ -267,6 +293,12 @@ class SimulationScene:
         self.nav.cancel()
         if self.policy is not None:
             self.policy.reset()
+        # 重置场景几何到默认 lawn_debris
+        self.task_scene_mgr.reset_to_default()
+        self._active_scene = SCENE_LAWN_DEBRIS
+        self._sim_detector.set_targets(["target_sphere"], ["ball"])
+        self._last_task_result = None
+        self._collected_targets.clear()
         self._refresh_snapshot()
         if was_running:
             self.start()
@@ -420,6 +452,50 @@ class SimulationScene:
         self.nav.start_heading_align(goal_heading)
         self._refresh_snapshot()
 
+    # ------------------------------------------------------------------
+    # 任务场景配置（被 /api/scene/setup 端点调用）
+    # ------------------------------------------------------------------
+    def configure_scene(
+        self,
+        scene: str,
+        target_x: float,
+        target_y: float,
+        home_x: float,
+        home_y: float,
+    ) -> None:
+        """激活指定任务场景：重定位 body + 切换感知器目标。
+
+        Args:
+            scene: 场景名（ALL_SCENES 之一）
+            target_x/y: 任务目标点（场景几何体摆放参考点）
+            home_x/y: 充电桩位置（material_drop 的 payload 初始位置）
+        """
+        if scene not in ALL_SCENES:
+            raise ValueError(f"未知场景: {scene!r}")
+
+        logger.info(
+            "[configure_scene] scene=%s target=(%.2f,%.2f) home=(%.2f,%.2f)",
+            scene, target_x, target_y, home_x, home_y,
+        )
+        # 估算目标 z（球体/方块半径，贴近地面）
+        target_z = 0.04 if scene == SCENE_LAWN_DEBRIS else 0.03
+        home_z = 0.05
+
+        self.task_scene_mgr.setup_scene(
+            scene,
+            target_pos=(target_x, target_y, target_z),
+            home_pos=(home_x, home_y, home_z),
+        )
+        self._active_scene = scene
+
+        # 切换感知器目标集
+        self._sim_detector.set_targets(
+            self.task_scene_mgr.target_body_names,
+            self.task_scene_mgr.target_labels,
+        )
+        self._last_task_result = None
+        self._refresh_snapshot()
+
     def enable_detect(self) -> None:
         """启用检测标注（调度端进入抓取准备阶段时调用）。"""
         self._detect_enabled = True
@@ -429,35 +505,291 @@ class SimulationScene:
         self._detect_enabled = False
 
     def start_grasp(self) -> None:
+        """启动抓取/作业流程。根据当前活动场景分发：
+          - lawn_debris / golf_ball : 走标准抓取管线（单次 / 多目标）
+          - material_drop           : 走投放流程（从 home 抓起方块 → 携带到 target → 释放）
+          - rain_inspect            : 巡检流程（不抓取，仅检测+记录）
+        """
         if self._algo_running:
             logger.warning("算法抓取已在运行中 — 忽略重复请求")
             return
-        logger.info("启动算法抓取")
+        logger.info("启动作业流程: scene=%s", self._active_scene)
         self._detect_enabled = True
         self._algo_running = True
-        # Sit down to improve grasp precision
-        self._sit_override = self._sit_pose.copy()
+        self._last_task_result = None
+        self._collected_targets.clear()
+
+        # 抓取/投放类场景需要坐下；巡检场景保持站立
+        if self.task_scene_mgr.requires_grasp or self.task_scene_mgr.requires_drop:
+            self._sit_override = self._sit_pose.copy()
+
+        # 根据场景选择 worker
+        if self.task_scene_mgr.requires_inspect:
+            worker = self._run_inspect
+        elif self._active_scene == SCENE_GOLF_BALL:
+            worker = self._run_multi_grasp
+        elif self.task_scene_mgr.requires_drop:
+            worker = self._run_material_drop
+        else:
+            worker = self._run_single_grasp
 
         def _run():
             try:
-                # Wait for sit-down stability (PD convergence)
-                logger.info("等待坐下稳定...")
-                time.sleep(2.5)
-                logger.info("坐下完成，开始抓取流程（含重新检测）")
-                self._algo_planner.execute_full_cycle()
-                logger.info("算法抓取完成: state=%s", self._algo_planner.state.value)
+                # 抓取/投放场景：等待坐下稳定
+                if self.task_scene_mgr.requires_grasp or self.task_scene_mgr.requires_drop:
+                    logger.info("等待坐下稳定...")
+                    time.sleep(2.5)
+                    logger.info("坐下完成，开始作业")
+                worker()
             except Exception as e:
-                logger.error("算法抓取异常: %s", e)
+                logger.error("作业流程异常: %s", e, exc_info=True)
+                self._last_task_result = TaskResult(
+                    scene=self._active_scene,
+                    outcome=TaskOutcome.FAILED,
+                    message=f"异常: {e}",
+                )
             finally:
                 self._algo_running = False
                 self._detect_enabled = False
                 # Restore standing pose
                 self._sit_override = None
-                logger.info("抓取结束，恢复站立姿态")
+                self._algo_planner._state = PlannerState.IDLE
+                logger.info("作业结束，恢复站立姿态: result=%s",
+                            self._last_task_result.outcome.value if self._last_task_result else "n/a")
+                self._refresh_snapshot()
 
         self._algo_thread = threading.Thread(target=_run, daemon=True)
         self._algo_thread.start()
         self._refresh_snapshot()
+
+    # ------------------------------------------------------------------
+    # 场景化作业实现
+    # ------------------------------------------------------------------
+    def _run_single_grasp(self) -> None:
+        """lawn_debris：单目标抓取（原有 execute_full_cycle）。"""
+        logger.info("开始单目标抓取 (lawn_debris)")
+        self._algo_planner.execute_full_cycle()
+        ok = self._algo_planner.state == PlannerState.SUCCESS
+        self._last_task_result = TaskResult(
+            scene=SCENE_LAWN_DEBRIS,
+            outcome=TaskOutcome.SUCCESS if ok else TaskOutcome.FAILED,
+            details={"planner_state": self._algo_planner.state.value},
+            message="单目标抓取成功" if ok else "单目标抓取失败",
+        )
+
+    def _run_multi_grasp(self) -> None:
+        """golf_ball：逐个抓取多目标，成功一个就在原地保持，记录进度。
+
+        简化策略：复用单次 execute_full_cycle，但每次只感知当前未被收集
+        的 body（通过 detector.set_targets 缩小目标集）。每次成功抓取后，
+        把该 body 从感知列表移除（视为已入篮）。
+        """
+        from algorithms.grasp.planner import GraspState as GS
+        total = len(self.task_scene_mgr.target_body_names)
+        logger.info("开始多目标回收 (golf_ball): 共 %d 个目标", total)
+
+        # 初始目标集：所有 golf 球
+        active_bodies = list(self.task_scene_mgr.target_body_names)
+        active_labels = list(self.task_scene_mgr.target_labels)
+        success_count = 0
+
+        for idx in range(total):
+            if not active_bodies:
+                break
+            # 缩小感知器目标集
+            self._sim_detector.set_targets(active_bodies, active_labels)
+            self._algo_planner._state = GS.IDLE
+            logger.info("[golf] 第 %d/%d 个目标，剩余感知: %s",
+                        idx + 1, total, active_bodies)
+
+            self._algo_planner.execute_full_cycle()
+            if self._algo_planner.state == GS.SUCCESS:
+                collected = active_bodies.pop(0)
+                self._collected_targets.append(collected)
+                success_count += 1
+                logger.info("[golf] 已回收 %s (%d/%d)", collected, success_count, total)
+                # 把已回收的球移到 park 区（视觉上「入篮」）
+                self.task_scene_mgr._relocate_body(collected, (100.0, 100.0, -5.0))
+                import mujoco
+                mujoco.mj_forward(self.robot.model, self.robot.data)
+                # 张开夹爪，准备下一次
+                cfg = self._algo_planner._config
+                self.robot._gripper_closed = False
+                time.sleep(0.3)
+            else:
+                logger.warning("[golf] 目标 %d 抓取失败 (state=%s)，跳过",
+                              idx + 1, self._algo_planner.state.value)
+                # 跳过该球（从感知集移除，避免循环卡死）
+                active_bodies.pop(0)
+
+        # 恢复默认感知目标集
+        self._sim_detector.set_targets(
+            self.task_scene_mgr.target_body_names,
+            self.task_scene_mgr.target_labels,
+        )
+
+        if success_count == total:
+            outcome = TaskOutcome.SUCCESS
+            msg = f"全部 {total} 个目标回收成功"
+        elif success_count > 0:
+            outcome = TaskOutcome.PARTIAL
+            msg = f"部分成功: {success_count}/{total}"
+        else:
+            outcome = TaskOutcome.FAILED
+            msg = f"全部 {total} 个目标均失败"
+
+        self._last_task_result = TaskResult(
+            scene=SCENE_GOLF_BALL,
+            outcome=outcome,
+            details={
+                "total": total,
+                "collected": success_count,
+                "collected_bodies": list(self._collected_targets),
+            },
+            message=msg,
+        )
+
+    def _run_material_drop(self) -> None:
+        """material_drop：投放流程。
+
+        简化策略：payload 初始在 home（充电桩）。机器人到 target 后启动
+        本流程，机械臂下降→「虚拟携带」payload（用 gripperConstraint 把
+        payload 绑定到 TCP）→抬起→原地释放（payload 落到 target）。
+        实际仿真中机器人已在 target，所以这里做的是「让方块从 home 传送
+        到 target 上方 → 释放」，模拟「携带到达」的语义。
+        """
+        import mujoco
+        logger.info("开始物料投放 (material_drop)")
+
+        # 1. 把 payload_box 从 home 传送到机械臂 TCP（模拟已携带）
+        tcp_site_id = mujoco.mj_name2id(
+            self.robot.model, mujoco.mjtObj.mjOBJ_SITE, "d1_tcp"
+        )
+        if tcp_site_id < 0:
+            self._last_task_result = TaskResult(
+                scene=SCENE_MATERIAL_DROP,
+                outcome=TaskOutcome.FAILED,
+                message="找不到 d1_tcp site，无法投放",
+            )
+            return
+
+        # 用 RobotSim 的 gripper constraint 把 payload 绑定到 TCP
+        payload_bid = mujoco.mj_name2id(
+            self.robot.model, mujoco.mjtObj.mjOBJ_BODY, "payload_box"
+        )
+        if payload_bid < 0:
+            self._last_task_result = TaskResult(
+                scene=SCENE_MATERIAL_DROP,
+                outcome=TaskOutcome.FAILED,
+                message="找不到 payload_box",
+            )
+            return
+
+        # 临时改写 robot 的抓取目标为 payload_box
+        original_ball_id = self.robot._grasp_target_body_id
+        original_qpos_addr = self.robot._ball_qpos_addr
+        original_qvel_addr = self.robot._ball_qvel_addr
+
+        jnt_id = self.robot.model.body_jntadr[payload_bid]
+        self.robot._grasp_target_body_id = payload_bid
+        self.robot._ball_qpos_addr = int(self.robot.model.jnt_qposadr[jnt_id])
+        self.robot._ball_qvel_addr = int(self.robot.model.jnt_dofadr[jnt_id])
+
+        try:
+            # 「抓取」payload（绑定到 TCP）
+            self.robot._gripper_closed = True
+            time.sleep(1.0)  # 让约束稳定
+            logger.info("[drop] payload 已绑定到 TCP")
+
+            # 抬升一点，模拟携带
+            cfg = self._algo_planner._config
+            self._algo_planner._executor.move_to_joints(
+                cfg.safe_park + [cfg.gripper_open], mode=1, wait_time=cfg.move_wait,
+            )
+
+            # 「释放」payload：松开夹爪，payload 自由下落
+            self.robot._gripper_closed = False
+            time.sleep(1.5)  # 等待物理下落
+            logger.info("[drop] payload 已释放")
+
+            # 检查 payload 是否落在 target 附近
+            payload_pos = self.robot.data.xpos[payload_bid].copy()
+            base_pos = self.robot.base_position
+            drop_err = float(np.linalg.norm(payload_pos[:2] - base_pos[:2]))
+
+            if drop_err < 0.5:
+                outcome = TaskOutcome.SUCCESS
+                msg = f"物料投放成功（落点偏差 {drop_err*100:.1f}cm）"
+            else:
+                outcome = TaskOutcome.PARTIAL
+                msg = f"物料投放偏移较大（{drop_err*100:.1f}cm）"
+
+            self._last_task_result = TaskResult(
+                scene=SCENE_MATERIAL_DROP,
+                outcome=outcome,
+                details={
+                    "drop_position": payload_pos.tolist(),
+                    "drop_error_m": drop_err,
+                },
+                message=msg,
+            )
+        finally:
+            # 恢复 robot 的原始抓取目标（target_sphere）
+            self.robot._grasp_target_body_id = original_ball_id
+            self.robot._ball_qpos_addr = original_qpos_addr
+            self.robot._ball_qvel_addr = original_qvel_addr
+            self.robot._gripper_closed = False
+
+    def _run_inspect(self) -> None:
+        """rain_inspect：巡检流程。不抓取，仅检测积水点+记录结果。"""
+        logger.info("开始巡检 (rain_inspect)")
+        cfg = self._algo_planner._config
+
+        # 把感知器目标切换到积水点
+        original_bodies = list(self._sim_detector._target_body_names)
+        original_labels = list(self._sim_detector._labels)
+        self._sim_detector.set_targets(
+            self.task_scene_mgr.target_body_names,
+            self.task_scene_mgr.target_labels,
+        )
+
+        try:
+            # 执行 3 次检测，汇总积水点
+            detections_log: list[dict] = []
+            detected_labels: set[str] = set()
+            for i in range(3):
+                dets = self._sim_detector.detect()
+                for d in dets:
+                    detected_labels.add(d.label)
+                    detections_log.append({
+                        "label": d.label,
+                        "depth_m": float(d.depth_m),
+                        "confidence": float(d.confidence),
+                    })
+                time.sleep(0.2)
+
+            # 机械臂做一个「扫描」动作（safe_park → 前伸 → 归位）作为可视化
+            self._algo_planner._executor.move_to_joints(
+                cfg.safe_park + [cfg.gripper_open], mode=1, wait_time=cfg.move_wait,
+            )
+            time.sleep(0.5)
+
+            logger.info("[inspect] 检测到 %d 个标记（去重 %d）",
+                       len(detections_log), len(detected_labels))
+
+            self._last_task_result = TaskResult(
+                scene=SCENE_RAIN_INSPECT,
+                outcome=TaskOutcome.SUCCESS,
+                details={
+                    "detections": detections_log,
+                    "unique_labels": sorted(detected_labels),
+                    "puddle_count": len(detected_labels),
+                },
+                message=f"巡检完成：发现 {len(detected_labels)} 个积水点",
+            )
+        finally:
+            # 恢复感知器目标
+            self._sim_detector.set_targets(original_bodies, original_labels)
 
     def cancel_grasp(self) -> None:
         self._algo_running = False

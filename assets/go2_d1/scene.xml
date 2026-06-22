@@ -81,5 +81,25 @@
       <freejoint/>
       <geom name="target_ball" type="sphere" size="0.025" rgba="1.0 0.85 0.1 1" mass="0.005"/>
     </body>
+
+    <!-- ============================================================ -->
+    <!-- 多场景预留 body（初始停放在地下 y=100，由 TaskSceneManager 重定位）-->
+    <!-- body 必须带 freejoint 才能在运行时改 qpos；不活跃时统一停在 park 区 -->
+    <!-- ============================================================ -->
+
+    <!-- golf_ball 场景：5 个白色高尔夫球（仅 golf_ball 场景激活时定位） -->
+    <body name="golf_ball_0" pos="100 100 -5"><freejoint/><geom name="golf_geom_0" type="sphere" size="0.018" rgba="0.98 0.98 0.98 1" mass="0.0015"/></body>
+    <body name="golf_ball_1" pos="100 100 -5"><freejoint/><geom name="golf_geom_1" type="sphere" size="0.018" rgba="0.98 0.98 0.98 1" mass="0.0015"/></body>
+    <body name="golf_ball_2" pos="100 100 -5"><freejoint/><geom name="golf_geom_2" type="sphere" size="0.018" rgba="0.98 0.98 0.98 1" mass="0.0015"/></body>
+    <body name="golf_ball_3" pos="100 100 -5"><freejoint/><geom name="golf_geom_3" type="sphere" size="0.018" rgba="0.98 0.98 0.98 1" mass="0.0015"/></body>
+    <body name="golf_ball_4" pos="100 100 -5"><freejoint/><geom name="golf_geom_4" type="sphere" size="0.018" rgba="0.98 0.98 0.98 1" mass="0.0015"/></body>
+
+    <!-- material_drop 场景：红色物料方块（material_drop 场景定位到 home，被抓取→携带→投放） -->
+    <body name="payload_box" pos="100 100 -5"><freejoint/><geom name="payload_geom" type="box" size="0.03 0.03 0.03" rgba="0.85 0.15 0.15 1" mass="0.01"/></body>
+
+    <!-- rain_inspect 场景：3 个深蓝「积水」标记（静态贴地，仅巡检演示用） -->
+    <body name="puddle_0" pos="12.0 0.0 0.012"><geom name="puddle_geom_0" type="cylinder" size="0.10 0.005" rgba="0.10 0.20 0.55 0.70"/></body>
+    <body name="puddle_1" pos="12.3 -0.2 0.012"><geom name="puddle_geom_1" type="cylinder" size="0.08 0.005" rgba="0.10 0.20 0.55 0.70"/></body>
+    <body name="puddle_2" pos="11.75 0.3 0.012"><geom name="puddle_geom_2" type="cylinder" size="0.09 0.005" rgba="0.10 0.20 0.55 0.70"/></body>
   </worldbody>
 </mujoco>

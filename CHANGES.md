@@ -193,6 +193,65 @@ SCENE_OPTIONS = [
 
 _后续改动按时间倒序记录于此。_
 
+### 2026-06-22 — 多任务场景（golf_ball / rain_inspect / material_drop）+ 导航 ALIGN 修复
+
+#### 新增：4 任务场景全链路支持
+
+把 web 前端预留的 3 个任务（golf_ball / rain_inspect / material_drop）从「disabled 占位」改为完整可跑。设计原则：**8 步 FSM 时间线不变，差异仅在 PICK_AND_PUT 阶段的作业行为**。
+
+**新增文件**：
+- `execution/sim_mujoco/task_scenes.py` — `TaskSceneManager` + `TaskResult`/`TaskOutcome`
+  - 「预放置 + 运行时重定位」策略：所有场景 body 预先定义在 `scene.xml` 的 park 区 (100,100,-5)，激活场景时通过 qpos 写入移到作业区
+  - `requires_grasp` / `requires_drop` / `requires_inspect` 属性区分作业类型
+
+**修改文件**：
+- `assets/go2_d1/scene.xml` — 新增 8 个预放置 body（5 golf balls + payload_box + 3 puddles），全部带 freejoint 初始在 park 区
+- `algorithms/perception/perception.py` — `SimObjectDetector` 新增 `set_targets()` / `_refresh_target_ids()`，支持运行时切换感知目标集（多场景共用同一检测器）
+- `execution/sim_mujoco/scene.py` —
+  - `configure_scene()` 激活场景（重定位 + 检测器切换）
+  - `start_grasp()` 改为场景化分发：`_run_single_grasp` / `_run_multi_grasp` / `_run_material_drop` / `_run_inspect`
+  - `_run_multi_grasp`：逐个抓取，成功一个 park 一个（detector.set_targets 缩小目标集）
+  - `_run_material_drop`：gripper constraint 绑 payload 到 TCP → 抬升 → 释放
+  - `_run_inspect`：检测积水点 + 机械臂扫描动作，不抓取
+  - 状态快照新增 `active_scene` / `task_result` 字段
+- `execution/sim_mujoco/sim_task_server.py` —
+  - 新增 `POST /api/scene/setup` 端点（激活场景）
+  - 新增 `GET /api/scene/current` 端点
+  - `/api/grasp/status` 增加 `scene` / `task_result` / `success` 字段
+  - `/api/state` 增加 `active_scene` / `task_result`
+- `scheduler/config.py` — `RobotConfig` 新增 `task_scene` 字段（默认 lawn_debris）；新增 `SUPPORTED_TASK_SCENES` 枚举
+- `scheduler/fsm.py` — `RobotTaskFSM` 新增 `scene` 参数（可覆盖 config.task_scene）
+- `scheduler/server/app.py` —
+  - `/run` 新增 `scene` query 参数，透传给 FSM；sim 模式下派发前自动 POST `/api/scene/setup`
+  - 前端：`SCENE_OPTIONS` 全部启用（4 个场景 disabled=false）
+  - 前端 i18n：新增 `sceneDispatch` / `sceneBtnPick` / `sceneSteps` 场景化文案；`applySceneText()` / `renderTimeline()` 按选中场景更新派发按钮、单步按钮、时间线步骤
+  - 前端：dispatch / btnGoTo / btnPick / btnDock 全部把 `scene` 加入 `/run` 查询参数
+- `scheduler/actions/pick_and_put_sim.py` — 改用 `_wait_for_completion`（轮询 busy 字段，场景无关）+ `_is_scene_success()` 场景化成功判定（task_result.outcome in {success,partial} 或 planner_state==success）
+- `scripts/run_eval_episode.py` — 新增 `--scene` 参数；run_task 接受 scene，激活场景几何；场景化成功判定；超时后 30s drain 等待 algo 线程收尾（保留 task_result）
+- `scripts/analyze_episode.py` — `analyze_grasp` 场景化：非抓取场景（inspect/drop）不强制抓取日志；优先读 `task_result.outcome`
+
+#### 修复：导航 ALIGN 永久卡死
+
+- **问题**：`require_heading=True`（返航）时 `_align_heading` 要求连续 10 步 `heading_error < 0.1rad`。RL policy 原地转向有稳态偏置，heading 在小范围震荡永远无法连续达标 → 返航 100% 超时失败
+- **修复**（`algorithms/navigation/navigation.py`）：三级收敛策略
+  1. 严格阈值 0.1rad 连续 10 步 → ARRIVED
+  2. 宽松阈值 `align_loose_threshold=0.25rad` 连续 20 步 → ARRIVED
+  3. 兜底 `align_max_steps=150` 强制 ARRIVED
+- 新增 `_align_step_count` 计数；角速度地板 0.05rad/s 避免小误差不动
+
+#### 验证（2026-06-22）
+
+4 个场景各跑一轮全流程（导航→作业→返航），全部 FINISHED：
+
+| 场景 | 耗时 | 结果 |
+|------|------|------|
+| lawn_debris   | 109.8s | ✓ success (单目标抓取) |
+| golf_ball     | 274.4s | ✓ partial (3/5 回收) |
+| rain_inspect  | 88.3s  | ✓ success (发现积水点) |
+| material_drop | 91.2s  | ✓ success (落点偏差 34.8cm) |
+
+HTTP 全链路验证：scheduler `/run?scene=rain_inspect` → sim `/api/scene/setup` 激活 → 导航 → 到达 → 巡检 → 返航 → FINISHED。
+
 ### 2026-06-08
 
 - **RL 策略集成**：新增 `execution/sim_mujoco/policy_runner.py`，将 TorchScript RL 策略接入仿真循环，实现真实的四足步态行走（替代原有滑动模式）

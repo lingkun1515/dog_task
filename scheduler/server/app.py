@@ -20,6 +20,7 @@ from ..actions import (
     go_docking, go_to_location, pick_and_put,
     go_docking_sim, go_to_location_sim, pick_and_put_sim,
 )
+from ..actions.http_utils import http_post as _action_http_post
 from ..config import load_robot_config
 from ..fsm import RobotTaskFSM
 from ..states import RobotState
@@ -370,10 +371,24 @@ INDEX_HTML = """<!DOCTYPE html>
         logEmpty: '暂无日志，派发任务后将在此显示运行输出',
         scenes: {
           lawn_debris: '草坪异物清理',
-          golf_ball: '高尔夫球回收（预留）',
-          rain_inspect: '雨后场地巡检（预留）',
-          material_drop: '养护物料投放（预留）',
+          golf_ball: '高尔夫球回收',
+          rain_inspect: '雨后场地巡检',
+          material_drop: '养护物料投放',
         },
+        // 场景化：派发按钮、单步按钮、关键步骤文案
+        sceneDispatch: {
+          lawn_debris: '一键派发清理任务',
+          golf_ball: '一键派发高尔夫球回收',
+          rain_inspect: '一键派发场地巡检',
+          material_drop: '一键派发物料投放',
+        },
+        sceneBtnPick: {
+          lawn_debris: '夹垃圾',
+          golf_ball: '夹高尔夫球',
+          rain_inspect: '执行巡检',
+          material_drop: '投放物料',
+        },
+        // 8 步时间线（索引 0-7），按场景覆盖 arm_start / arm_done 两步
         steps: [
           { label: '待命', hint: '等待派单' },
           { label: '已接单', hint: '任务已受理' },
@@ -384,6 +399,21 @@ INDEX_HTML = """<!DOCTYPE html>
           { label: '返回充电桩', hint: '回充导航中' },
           { label: '完成', hint: '闭环结束' },
         ],
+        // 按场景覆盖某些步骤的文案（key=step_index）
+        sceneSteps: {
+          golf_ball: {
+            4: { label: '逐个回收', hint: '机械臂多目标抓取' },
+            5: { label: '多球入篮', hint: '回收进度查看日志' },
+          },
+          rain_inspect: {
+            4: { label: '巡检扫描', hint: '检测积水/异物' },
+            5: { label: '巡检完成', hint: '生成报告' },
+          },
+          material_drop: {
+            4: { label: '投放作业', hint: '释放物料到目标' },
+            5: { label: '投放完成', hint: '物料已就位' },
+          },
+        },
         failHint: {
           GO_TO_LOCATION: '前往作业点失败，已进入人工接管',
           PICK_AND_PUT: '到点确认或机械臂作业失败，已进入人工接管',
@@ -434,9 +464,21 @@ INDEX_HTML = """<!DOCTYPE html>
         logEmpty: 'No logs yet. Output appears here after dispatch.',
         scenes: {
           lawn_debris: 'Lawn debris cleanup',
-          golf_ball: 'Golf ball recovery (reserved)',
-          rain_inspect: 'Post-rain inspection (reserved)',
-          material_drop: 'Material drop (reserved)',
+          golf_ball: 'Golf ball recovery',
+          rain_inspect: 'Post-rain inspection',
+          material_drop: 'Material drop',
+        },
+        sceneDispatch: {
+          lawn_debris: 'Dispatch cleanup task',
+          golf_ball: 'Dispatch golf ball recovery',
+          rain_inspect: 'Dispatch site inspection',
+          material_drop: 'Dispatch material drop',
+        },
+        sceneBtnPick: {
+          lawn_debris: 'Pick debris',
+          golf_ball: 'Pick golf ball',
+          rain_inspect: 'Run inspection',
+          material_drop: 'Drop material',
         },
         steps: [
           { label: 'Standby', hint: 'Awaiting dispatch' },
@@ -448,6 +490,20 @@ INDEX_HTML = """<!DOCTYPE html>
           { label: 'Return to dock', hint: 'Docking navigation' },
           { label: 'Done', hint: 'Cycle complete' },
         ],
+        sceneSteps: {
+          golf_ball: {
+            4: { label: 'Recover each', hint: 'Multi-target grasp' },
+            5: { label: 'Balls collected', hint: 'See log for count' },
+          },
+          rain_inspect: {
+            4: { label: 'Scan site', hint: 'Detect puddles / debris' },
+            5: { label: 'Inspection done', hint: 'Report generated' },
+          },
+          material_drop: {
+            4: { label: 'Drop payload', hint: 'Release at target' },
+            5: { label: 'Drop complete', hint: 'Payload delivered' },
+          },
+        },
         failHint: {
           GO_TO_LOCATION: 'Failed to reach work site. Manual takeover required.',
           PICK_AND_PUT: 'Arrival or arm operation failed. Manual takeover required.',
@@ -481,9 +537,9 @@ INDEX_HTML = """<!DOCTYPE html>
 
     const SCENE_OPTIONS = [
       { value: 'lawn_debris', disabled: false },
-      { value: 'golf_ball', disabled: true },
-      { value: 'rain_inspect', disabled: true },
-      { value: 'material_drop', disabled: true },
+      { value: 'golf_ball', disabled: false },
+      { value: 'rain_inspect', disabled: false },
+      { value: 'material_drop', disabled: false },
     ];
 
     let lang = localStorage.getItem('mower_lang') || 'zh';
@@ -540,13 +596,29 @@ INDEX_HTML = """<!DOCTYPE html>
       sceneSelect.value = prev;
       if (!sceneSelect.value) sceneSelect.value = 'lawn_debris';
       setLogVisible(logPanel.classList.contains('show'));
+      applySceneText();
       renderTimeline();
     }
 
+    function applySceneText() {
+      // 派发按钮 + 单步 PICK 按钮按选中场景切换文案
+      const pack = I18N[lang];
+      const scene = sceneSelect.value || 'lawn_debris';
+      const dispatchText = (pack.sceneDispatch && pack.sceneDispatch[scene]) || pack.dispatch;
+      const pickText = (pack.sceneBtnPick && pack.sceneBtnPick[scene]) || pack.btnPick;
+      dispatchBtn.textContent = dispatchText;
+      document.getElementById('btnPick').textContent = pickText;
+    }
+
     function renderTimeline() {
-      const steps = I18N[lang].steps;
+      const pack = I18N[lang];
+      const baseSteps = pack.steps;
+      const scene = sceneSelect.value || 'lawn_debris';
+      const sceneOverrides = (pack.sceneSteps && pack.sceneSteps[scene]) || {};
       timelineEl.innerHTML = STEP_IDS.map((id, i) => {
-        const s = steps[i];
+        const s = sceneOverrides[i]
+          ? Object.assign({}, baseSteps[i], sceneOverrides[i])
+          : baseSteps[i];
         let cls = '';
         if (i < stepIdx) cls = 'done';
         else if (i === stepIdx) cls = 'active';
@@ -781,19 +853,23 @@ INDEX_HTML = """<!DOCTYPE html>
     }
 
     function dispatch() {
-      startTask({ max_retries: 3 });
+      startTask({ scene: sceneSelect.value, max_retries: 3 });
     }
 
     dispatchBtn.addEventListener('click', dispatch);
     robotSelect.addEventListener('change', refreshVideoFeed);
+    sceneSelect.addEventListener('change', () => {
+      applySceneText();
+      renderTimeline();
+    });
     document.getElementById('btnGoTo').addEventListener('click', () => {
-      startTask({ action: 'go_to_location', max_retries: 3 }, { action: 'go_to_location' });
+      startTask({ scene: sceneSelect.value, action: 'go_to_location', max_retries: 3 }, { action: 'go_to_location' });
     });
     document.getElementById('btnPick').addEventListener('click', () => {
-      startTask({ action: 'pick_and_put', max_retries: 1 }, { action: 'pick_and_put' });
+      startTask({ scene: sceneSelect.value, action: 'pick_and_put', max_retries: 1 }, { action: 'pick_and_put' });
     });
     document.getElementById('btnDock').addEventListener('click', () => {
-      startTask({ action: 'go_docking', max_retries: 3 }, { action: 'go_docking' });
+      startTask({ scene: sceneSelect.value, action: 'go_docking', max_retries: 3 }, { action: 'go_docking' });
     });
     langToggle.addEventListener('click', () => {
       lang = lang === 'zh' ? 'en' : 'zh';
@@ -942,6 +1018,7 @@ def api_video_feed(robot_id: str = DEFAULT_ROBOT_ID) -> JSONResponse:
 def run(
     robot_id: str = Query(DEFAULT_ROBOT_ID, description="机器人编号"),
     action: str | None = Query(None, description="单步动作：go_to_location / pick_and_put / go_docking"),
+    scene: str | None = Query(None, description="任务场景：lawn_debris/golf_ball/rain_inspect/material_drop"),
     max_retries: int = Query(3, ge=1, le=10, description="动作最大重试次数"),
     client_start_ms: int | None = Query(None, description="前端点击派发时的 Date.now() 毫秒时间戳"),
 ) -> StreamingResponse:
@@ -950,6 +1027,16 @@ def run(
     except (FileNotFoundError, ValueError) as exc:
         return StreamingResponse(
             iter([f'data: {json.dumps({"type": "error", "msg": str(exc)}, ensure_ascii=False)}\n\n']),
+            media_type="text/event-stream",
+        )
+
+    # 任务场景：前端可覆盖 config.task_scene；sim 模式下生效
+    active_scene = scene or config.task_scene
+    if active_scene not in (
+        "lawn_debris", "golf_ball", "rain_inspect", "material_drop"
+    ):
+        return StreamingResponse(
+            iter([f'data: {json.dumps({"type": "error", "msg": f"未知场景: {active_scene}"}, ensure_ascii=False)}\n\n']),
             media_type="text/event-stream",
         )
 
@@ -983,6 +1070,28 @@ def run(
                 grasp_port=config.grasp_port,
                 execution_url=config.execution_url,
             )
+            recorder.event("scene_selected", scene=active_scene)
+
+            # sim 模式：任务开始前激活场景几何（重定位 body + 切换感知器）
+            if config.mode == "sim":
+                try:
+                    scene_payload = {
+                        "scene": active_scene,
+                        "target_x": config.target_x,
+                        "target_y": config.target_y,
+                        "home_x": config.home_x,
+                        "home_y": config.home_y,
+                    }
+                    scene_resp = _action_http_post(
+                        f"{config.execution_url}/api/scene/setup",
+                        scene_payload,
+                    )
+                    if scene_resp:
+                        q.put({"type": "log", "msg": f"场景已激活: {active_scene}"})
+                    else:
+                        q.put({"type": "log", "msg": f"⚠ 场景激活失败: {active_scene}"})
+                except Exception as exc:  # noqa: BLE001
+                    q.put({"type": "log", "msg": f"⚠ 场景激活异常: {exc}"})
 
             def on_timeline(step: str):
                 q.put({"type": "timeline", "step": step})
@@ -1024,6 +1133,7 @@ def run(
                         fsm = RobotTaskFSM(
                             config=config,
                             max_retries=max_retries,
+                            scene=active_scene,
                             on_state_change=on_change,
                             on_timeline=on_timeline,
                             on_mark=recorder.mark,

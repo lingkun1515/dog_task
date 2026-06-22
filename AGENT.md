@@ -313,6 +313,30 @@ python -m scripts.video_review --video logs/eval_episodes/<latest>/third_person.
 - 原因：边走边转策略在微小航向偏差时频繁转向，RL policy 每步损失行进距离。
 - 当前不影响成功率但影响效率，可作为后续优化方向。
 
+### 关键发现：多任务场景架构（task_scene）
+
+- **设计**：4 个场景（lawn_debris/golf_ball/rain_inspect/material_drop）共用同一 8 步 FSM 时间线，差异仅在 PICK_AND_PUT 阶段的行为。
+- **几何管理**：MuJoCo 编译后的 MjModel 不能动态增删 body。采用「预放置 + 运行时重定位」——所有场景 body 预先放在 scene.xml 的 park 区（100,100,-5），激活时通过 qpos 写入移到作业区。与 `apply_gripper_constraint` 写 ball qpos 同一思路。
+- **场景切换链路**：前端 sceneSelect → `/run?scene=xxx` → scheduler `/api/scene/setup` POST → `TaskSceneManager.setup_scene()` 重定位 body + `SimObjectDetector.set_targets()` 切换感知目标。
+- **场景化作业分发**：`SimulationScene.start_grasp()` 按 `_active_scene` 选择 worker：
+  - lawn_debris → `_run_single_grasp`（原 execute_full_cycle）
+  - golf_ball → `_run_multi_grasp`（逐个抓取，成功一个 park 一个）
+  - material_drop → `_run_material_drop`（gripper constraint 绑 payload 到 TCP → 释放）
+  - rain_inspect → `_run_inspect`（仅检测积水点，机械臂扫描动作）
+- **结果语义**：`TaskResult.outcome` ∈ {success/partial/failed/skipped}。PICK_AND_PUT 用 `_is_scene_success()` 判定：success/partial 都算作业成功。golf_ball 3/5 即 partial → success。
+- **验证（2026-06-22）**：4 个场景各跑一轮全流程（导航→作业→返航），全部 FINISHED：
+  - lawn_debris 109.8s / golf_ball 274.4s (3/5 partial) / rain_inspect 88.3s / material_drop 91.2s
+
+### 关键发现：ALIGN 阶段收敛（导航 bug 修复）
+
+- **问题**：`require_heading=True` 时，`_align_heading` 要求连续 10 步 heading_error < 0.1rad (5.7°)。RL policy 原地旋转有稳态偏置，heading 在小范围震荡，永远无法连续 10 步达标 → 永久卡在 ALIGN，返航 100% 失败。
+- **修复**：三级收敛策略
+  1. 严格阈值 `heading_threshold` (0.1rad) 连续 10 步 → ARRIVED
+  2. 宽松阈值 `align_loose_threshold` (0.25rad ≈ 14°) 连续 20 步 → ARRIVED
+  3. 兜底：`align_max_steps` (150 步 ≈ 3s) 强制 ARRIVED
+- **副作用**：goal_heading 不再严格保证，但 docking 功能恢复。sim2real 时需注意：实机原地转向若更精确，可禁用宽松阈值。
+
+
 ## 十、参数经验库
 
 ### 导航参数

@@ -250,33 +250,60 @@ class EpisodeAnalyzer:
         return result
 
     def analyze_grasp(self) -> dict:
-        """分析抓取质量。
+        """分析抓取/作业质量（场景化）。
+
+        - lawn_debris / golf_ball : 走传统抓取分析（IK / 抓取 / 提起）
+        - rain_inspect / material_drop : 检查 task_result.outcome
 
         Returns:
-            dict: 抓取分析结果
+            dict: 抓取/作业分析结果
         """
+        scene = (self.meta or {}).get("scene", "lawn_debris")
         result = {
+            "scene": scene,
             "grasp_phases": len(self.grasp_log),
             "ik_success": False,
             "grasp_success": False,
             "lift_success": False,
             "arm_motion_smoothness": None,
             "grasp_duration_s": None,
+            "task_outcome": None,
             "errors": [],
         }
 
+        # 优先读取 sim 端 task_result（所有场景都有）
+        final_state = (self.meta or {}).get("final_state") or {}
+        task_result = final_state.get("task_result")
+        if task_result:
+            result["task_outcome"] = task_result.get("outcome")
+            if task_result.get("outcome") in ("success", "partial"):
+                result["grasp_success"] = True
+                result["ik_success"] = True
+                result["lift_success"] = True
+
+        # 非抓取场景（巡检/投放）不要求传统抓取日志
+        non_grasp_scenes = ("rain_inspect", "material_drop")
+        if scene in non_grasp_scenes:
+            if not self.grasp_log and result["task_outcome"] is None:
+                result["errors"].append(f"场景 {scene} 无 task_result 且无作业日志")
+            logger.info("作业分析完成 (scene=%s): outcome=%s",
+                        scene, result["task_outcome"])
+            return result
+
+        # 抓取类场景：传统分析
         if not self.grasp_log:
-            result["errors"].append("无抓取日志数据")
+            if not result["grasp_success"]:
+                result["errors"].append("无抓取日志数据")
             return result
 
         # 检查抓取阶段
         phases = [entry["phase"] for entry in self.grasp_log]
 
         # IK 成功：有 grasping 阶段
-        result["ik_success"] = "grasping" in phases
+        result["ik_success"] = result["ik_success"] or ("grasping" in phases)
 
-        # 抓取成功：有 grasp_success 阶段
-        result["grasp_success"] = "grasp_success" in phases
+        # 抓取成功：有 grasp_success 阶段（或 task_result 已判）
+        result["grasp_success"] = result["grasp_success"] or ("grasp_success" in phases)
 
         # 提起成功：planner execute_full_cycle 在 success 前必经 lift → park
         if result["grasp_success"]:
@@ -303,8 +330,8 @@ class EpisodeAnalyzer:
             if velocities:
                 result["arm_motion_smoothness"] = float(np.std(velocities))
 
-        logger.info("抓取分析完成: IK=%s, 抓取=%s, 提起=%s, 耗时=%.1fs",
-                    result["ik_success"], result["grasp_success"],
+        logger.info("抓取分析完成 (scene=%s): IK=%s, 抓取=%s, 提起=%s, 耗时=%.1fs",
+                    scene, result["ik_success"], result["grasp_success"],
                     result["lift_success"], result.get("grasp_duration_s") or 0)
         return result
 
@@ -525,10 +552,12 @@ def main():
     print(f"  朝向误差: {results['navigation'].get('heading_error_deg', 'N/A')}°")
     print(f"  路径长度: {results['navigation'].get('path_length_m', 0):.2f}m")
     print()
-    print("抓取:")
+    print("抓取/作业:")
+    print(f"  场景: {results['grasp'].get('scene', 'lawn_debris')}")
     print(f"  IK 成功: {results['grasp'].get('ik_success', False)}")
     print(f"  抓取成功: {results['grasp'].get('grasp_success', False)}")
     print(f"  提起成功: {results['grasp'].get('lift_success', False)}")
+    print(f"  作业结果: {results['grasp'].get('task_outcome', 'N/A')}")
     print()
     print("稳定性:")
     print(f"  摔倒检测: {results['stability'].get('fall_detected', False)}")

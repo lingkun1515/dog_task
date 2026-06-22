@@ -194,7 +194,33 @@ DogTaskSim/
 ## 任务流程
 
 ```
-派发 → GO_TO_LOCATION (导航+检测) → PICK_AND_PUT (抓取) → GO_DOCKING (返航+对齐) → FINISHED
+派发 → GO_TO_LOCATION (导航+检测) → PICK_AND_PUT (作业) → GO_DOCKING (返航+对齐) → FINISHED
+```
+
+### 任务场景（task_scene）
+
+调度后台支持 4 种任务场景，共用同一 8 步时间线，差异仅在 PICK_AND_PUT 阶段的作业行为：
+
+| 场景 | PICK_AND_PUT 行为 | 默认目标体 |
+|------|------------------|-----------|
+| `lawn_debris`   | 单目标抓取（球体）       | target_sphere |
+| `golf_ball`     | 多目标逐个回收（5 个球） | golf_ball_0..4 |
+| `rain_inspect`  | 巡检扫描（检测积水点，不抓取） | puddle_0..2 |
+| `material_drop` | 物料投放（携带方块→释放） | payload_box |
+
+前端「任务类型」下拉框选择场景；调度端把 `scene` 参数透传给 `/run`，
+scheduler 在派发前调用 `/api/scene/setup` 激活场景几何（重定位 MuJoCo body
++ 切换感知器目标集）。
+
+```bash
+# 指定场景跑评估
+python -m scripts.run_eval_episode --config sim_go2_d1 --scene golf_ball
+python -m scripts.run_eval_episode --config sim_go2_d1 --scene rain_inspect
+
+# HTTP API：场景激活
+curl -X POST http://localhost:8100/api/scene/setup \
+  -H "Content-Type: application/json" \
+  -d '{"scene":"material_drop","target_x":12,"target_y":0,"home_x":0,"home_y":-10}'
 ```
 
 ## TODO
@@ -203,6 +229,8 @@ DogTaskSim/
 - [ ] 集成宇树官方 MuJoCo 仿真运控（替代当前第三方 RL policy）
 - [ ] 定位支持外部输入、导航 stack 支持外部服务（如 nav2）
 - [ ] 更新算法模块（感知、IK、抓取策略）
+- [ ] golf_ball 场景：改善多目标 IK 成功率（当前 3/5，球在工作空间边界）
+- [ ] rain_inspect 场景：机器人到达后离目标太近，相机检测积水点需后撤策略
 
 ## 运行环境
 

@@ -178,6 +178,53 @@ def navigate_cancel() -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# Task scene configuration (multi-scene task support)
+# ---------------------------------------------------------------------------
+@app.post("/api/scene/setup")
+def scene_setup(body: dict[str, Any]) -> dict[str, Any]:
+    """Activate a task scene: relocate bodies + switch detector targets.
+
+    Body: {
+        "scene": "lawn_debris" | "golf_ball" | "rain_inspect" | "material_drop",
+        "target_x": float, "target_y": float,
+        "home_x": float, "home_y": float,
+    }
+    """
+    scene = get_scene()
+    scene_name = str(body.get("scene", "lawn_debris"))
+    target_x = float(body.get("target_x", 12.0))
+    target_y = float(body.get("target_y", 0.0))
+    home_x = float(body.get("home_x", 0.0))
+    home_y = float(body.get("home_y", -10.0))
+    logger.info("场景激活: scene=%s target=(%.2f,%.2f) home=(%.2f,%.2f)",
+                scene_name, target_x, target_y, home_x, home_y)
+    try:
+        scene.configure_scene(scene_name, target_x, target_y, home_x, home_y)
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"status": "error", "detail": str(exc)})
+    return {
+        "status": "ok",
+        "scene": scene_name,
+        "target_bodies": scene.task_scene_mgr.target_body_names,
+        "target_labels": scene.task_scene_mgr.target_labels,
+    }
+
+
+@app.get("/api/scene/current")
+def scene_current() -> dict[str, Any]:
+    """Return the currently active scene and its target set."""
+    scene = get_scene()
+    mgr = scene.task_scene_mgr
+    s = scene.state
+    return {
+        "scene": s["active_scene"],
+        "target_bodies": mgr.target_body_names,
+        "target_labels": mgr.target_labels,
+        "task_result": s["task_result"],
+    }
+
+
+# ---------------------------------------------------------------------------
 # Grasp
 # ---------------------------------------------------------------------------
 @app.post("/api/grasp")
@@ -196,10 +243,20 @@ def grasp() -> dict[str, str]:
 def grasp_status() -> dict[str, Any]:
     scene = get_scene()
     gs = scene.state["grasp_state"]
+    planner_state = scene._algo_planner.state.value if scene._algo_planner else gs
+    task_result = scene.state.get("task_result")
+    # 场景化任务的成功判定：task_result.outcome in {success, partial} 或 planner SUCCESS
+    success = (
+        (task_result is not None and task_result.get("outcome") in ("success", "partial"))
+        or planner_state == "success"
+    )
     return {
         "busy": scene._algo_running,
         "status": gs,
-        "planner_state": scene._algo_planner.state.value if scene._algo_planner else gs,
+        "planner_state": planner_state,
+        "scene": scene.state.get("active_scene"),
+        "task_result": task_result,
+        "success": success,
     }
 
 
@@ -254,6 +311,8 @@ def robot_state() -> dict[str, Any]:
         "nav_target": s["nav_target"],
         "grasp_state": s["grasp_state"],
         "planner_state": scene._algo_planner.state.value if scene._algo_planner else "not_init",
+        "active_scene": s.get("active_scene"),
+        "task_result": s.get("task_result"),
     }
 
 

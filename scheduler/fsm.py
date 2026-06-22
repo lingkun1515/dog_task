@@ -26,6 +26,7 @@ class RobotTaskFSM:
         self,
         config: RobotConfig,
         max_retries: int = 3,
+        scene: str | None = None,
         on_state_change=None,
         on_timeline=None,
         on_mark=None,
@@ -34,6 +35,9 @@ class RobotTaskFSM:
         self.config = config
         self._state = RobotState.GO_TO_LOCATION
         self.max_retries = max_retries
+        # 任务场景（lawn_debris/golf_ball/rain_inspect/material_drop）。
+        # 可在派发时通过 scene 覆盖 config.task_scene；缺省沿用配置。
+        self.scene = scene or config.task_scene
         self.on_state_change = on_state_change
         self.on_timeline = on_timeline
         self.on_mark = on_mark
