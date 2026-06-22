@@ -390,10 +390,31 @@ python -m scripts.video_review --video logs/eval_episodes/<latest>/third_person.
 - 手指 mass=0.01kg（超过 0.05 会破坏手臂平衡导致摔倒）
 - motor ctrlrange=±3 N·m
 
-**已知限制：**
-- 球在 arm 工作空间边界外时 IK 到不了 → 物理接触不发生 → weld 兜底
-- 物理夹取在 IK 精确到位时才真正生效（当前多数情况走 weld 兜底）
-- 手指视觉很小，视频里开合不明显（需近距离视角）
+### 关键发现：L3 多目标类型 + pin 机制
+
+**多类型目标体（mixed_debris 场景）：**
+- 球(sphere) + 方块(box×2) + 圆柱(cylinder/瓶) + 袋装(capsule) 共 5 种形状
+- 感知按 `body_name` 分类标签（ball/box/bottle/bag），`Detection.body_name` 字段去重
+- multi-grasp 逐个抓取，每个目标回收后 park + 下一个
+
+**pin 机制（核心修复）：**
+- **问题**：freejoint body 有 mass 时受重力下落。即使 `contype=0` 不碰撞地面，body 仍自由下落（qpos 持续变化）。导航 40s 期间 debris 全部掉到地下。
+- **修复**：`TaskSceneManager.pin_body(name, pos, quat)` 记录钉住位置，`apply_pins()` 每步重置 qpos + 清零 qvel。scene loop 在 physics step 后调用。
+- **抓取时**：unpin 当前目标（让 weld 接管），完成后该 body 已 park（不需要重新 pin）。
+- **通用**：任何 freejoint 静态摆放的 body 都需要 pin，否则会受重力影响。
+
+**单 weld 动态重绑定（避免多 weld segfault）：**
+- **问题**：scene.xml 定义 8 个 weld equality（每个 debris 一个），即使全 inactive，MuJoCo 在 mj_forward 预计算 weld Jacobian 时，body1 在 park 区（100,100,-5）距离 body2(d1_link6) 极远 → Jacobian 奇异 → segfault。
+- **修复**：只保留 1 个 weld，运行时 `model.eq_obj1id[weld_id] = 当前目标 body_id` 动态重绑定。
+- **教训**：MuJoCo equality 数量要最小化，inactive 的 weld 仍消耗 solver 计算且可能引入数值不稳定。
+
+**contype/conaffinity 碰撞开关：**
+- debris body 初始 `contype=0 conaffinity=0`（不碰撞，避免 park 区干扰主场景物理）
+- 激活时 `_relocate_body(enable_collision=True)` 设 contype=1（参与碰撞 + 抓取接触）
+
+**验证（2026-06-22 L3）：**
+- mixed_debris 165.9s，5/5 全回收（球+方块×2+瓶+袋），路径 32.67m，到达误差 0.165m
+- lawn_debris 基线正常（90s success）
 
 - **设计**：`scripts/record_task_video.py` 独立跑完整 FSM 任务 + 录制。
 - **合成视频**：第三视角（跟踪相机）为主画面，第一视角（front_cam 640×480 原生分辨率）作 PiP 嵌入左上角，叠加与 web `/api/video_feed` 一致的检测框。

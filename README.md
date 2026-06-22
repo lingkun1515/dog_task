@@ -207,6 +207,7 @@ DogTaskSim/
 | `golf_ball`     | 多目标逐个回收（5 个球） | golf_ball_0..4 |
 | `rain_inspect`  | 巡检扫描（检测积水点，不抓取） | puddle_0..2 |
 | `material_drop` | 物料投放（携带方块→释放） | payload_box |
+| `mixed_debris`  | 多类型多目标回收（球+方块+瓶+袋） | target_sphere + debris_box/bottle/bag |
 
 前端「任务类型」下拉框选择场景；调度端把 `scene` 参数透传给 `/run`，
 scheduler 在派发前调用 `/api/scene/setup` 激活场景几何（重定位 MuJoCo body
@@ -239,6 +240,8 @@ curl -X POST http://localhost:8100/api/scene/setup \
 - [ ] 更新算法模块（感知、IK、抓取策略）
 - [x] golf_ball 场景：5/5 全部回收（收紧布局避开工作空间边界）
 - [x] rain_inspect 场景：3/3 积水点检测（nav_dwell_distance 后撤 + body_name 去重）
+- [x] 抓取真实性：L1 weld 软约束 + L2 物理手指 + 混合兜底策略
+- [x] 多目标类型：mixed_debris 场景（球+方块+瓶+袋 5/5 回收）
 - [ ] 批量评估脚本 `scripts/run_batch_eval.py` 已就绪，可加入 CI 定期跑
 - [x] 任务视频录制：`scripts/record_task_video.py`（第三视角 + front cam PiP + 检测框，与 web 一致）
 - [ ] 渲染后端：本机 EGL 失败，用 GLFW 隐藏窗口；实机/CI 环境若 EGL 可用可切回

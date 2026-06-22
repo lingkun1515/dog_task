@@ -193,6 +193,45 @@ SCENE_OPTIONS = [
 
 _后续改动按时间倒序记录于此。_
 
+### 2026-06-22（第四轮）— 抓取真实性 L1→L2→L3 全栈改造
+
+#### L1：weld equality 软约束（替换硬 qpos 绑定）
+
+- `apply_gripper_constraint` 从「硬设球 qpos=TCP + 清零速度」改为 MuJoCo `weld` equality
+- 球通过物理约束跟随 TCP，松手停用 weld 后球自由下落（有惯性、有重力）
+- weld eq_data 布局：`[anchor(3), relquat(4)=(0,0,0,1), relpos(3)]`
+
+#### L2：物理手指 + 摩擦接触夹取
+
+- `go2d1.xml`：两根手指加 slide joint（沿 link6 局部 X 轴开合）+ box 碰撞几何
+  - range ±0.034m，指间距 0-68mm（D1 实机 66.8mm）
+  - 接触面 friction=1.8，solref=0.01
+  - +2 finger motor actuator（nu 18→20）
+- `robot_loader.py`：step() 前 18 ctrl 用 PD tau，后 2 ctrl 用力矩（闭合/张开）
+- `scene.py`：RL policy 只接收前 18 PD 关节（修复 tensor size 20 vs 18）
+- **混合策略**：闭合时优先物理接触；300 步内无接触则激活 weld 兜底（IK 没到位时）
+
+#### L3：多目标类型 + mixed_debris 场景
+
+- `scene.xml`：新增 debris body——3 方块(box) + 2 圆柱(bottle) + 1 袋装(capsule)
+- `task_scenes.py`：新增 `SCENE_MIXED_DEBRIS` 场景（球+方块×2+瓶+袋 共 5 目标）
+  - `pin_body/apply_pins` 机制：freejoint body 受重力下落，每步重置 qpos 钉住
+  - `_relocate_body(enable_collision=...)`：激活时 contype=1，park 时=0
+- `robot_loader.py`：单 weld 动态重绑定（`model.eq_obj1id` 运行时改为当前目标 body）
+  - 避免多 weld 预计算 Jacobian 导致 segfault
+- 感知按 `body_name` 分类标签（ball/box/bottle/bag）
+- `scene.py`：mixed_debris 路由到 `_run_multi_grasp`，每个目标抓取前更新 `_grasp_target_body_id`
+- 前端/scheduler：新增 mixed_debris 场景选项（中英文 i18n + sceneSteps）
+
+#### 验证（2026-06-22 L1→L2→L3）
+
+| 场景 | 结果 | 耗时 | 回收 |
+|------|------|------|------|
+| lawn_debris   | success | 90s   | 1/1 |
+| mixed_debris  | success | 165.9s | 5/5（球+方块×2+瓶+袋）|
+
+视频验证：mixed_debris 95.8s 视频，多颜色目标（黄球/棕方块/蓝瓶/棕袋）均可见。
+
 ### 2026-06-22（第三轮）— 任务视频录制（PiP + 检测框）+ 并发安全修复
 
 #### 新增：自主任务视频录制器
