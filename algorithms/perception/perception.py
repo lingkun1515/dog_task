@@ -530,7 +530,9 @@ class SimObjectDetector(ObjectDetector):
         cyi = self._intrinsics["cy"]
 
         detections = []
-        for bid, label in zip(self._target_body_ids, self._target_labels):
+        for bid, label, name in zip(
+            self._target_body_ids, self._target_labels, self._target_body_names
+        ):
             world_pos = self._data.xpos[bid].copy()
             pos_cam = self._world_to_cam(world_pos)
             depth = float(pos_cam[2])
@@ -547,6 +549,7 @@ class SimObjectDetector(ObjectDetector):
                     depth_m=abs(depth) if abs(depth) > 0.001 else 0.001,
                     position_cam=pos_cam,
                     confidence=1.0,
+                    body_name=name,
                 ))
                 continue
 
@@ -574,6 +577,7 @@ class SimObjectDetector(ObjectDetector):
                 depth_m=depth,
                 position_cam=pos_cam,
                 confidence=1.0,
+                body_name=name,
             ))
         return detections
 

@@ -21,6 +21,7 @@ class Detection:
     position_cam: np.ndarray | None = None   # 相机坐标系 3D（real）
     position_world: np.ndarray | None = None  # 世界坐标系 3D（sim）
     confidence: float = 1.0
+    body_name: str | None = None  # sim: 对应的 MuJoCo body 名（用于唯一标识/去重）
 
 
 class ObjectDetector(ABC):

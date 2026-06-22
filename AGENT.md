@@ -336,6 +336,32 @@ python -m scripts.video_review --video logs/eval_episodes/<latest>/third_person.
   3. 兜底：`align_max_steps` (150 步 ≈ 3s) 强制 ARRIVED
 - **副作用**：goal_heading 不再严格保证，但 docking 功能恢复。sim2real 时需注意：实机原地转向若更精确，可禁用宽松阈值。
 
+### 关键发现：场景化导航停靠点（nav_dwell_distance）
+
+- **问题**：rain_inspect 场景机器人导航**到达**目标点 (12,0)，正好压在积水点上方，相机深度为负（在相机后方），检测不到。
+- **方案**：导航到「目标点 - 朝向方向 × nav_dwell_distance」处停下，留出观察距离。
+  - `RobotConfig.nav_dwell_distance` 字段（默认 0）；rain_inspect 场景默认 0.6m。
+  - `go_to_location_sim._compute_dwell_stop()` 在 home→target 方向上从 target 退 dwell 米。
+- **效果**：rain_inspect 从「发现 1 个积水点（全部压在身下）」→「发现 3/3 个积水点」。
+
+### 关键发现：Detection.body_name 字段（sim 去重）
+
+- **新增**：`Detection.body_name` 字段（sim 从 xpos 兜底填充对应的 MuJoCo body 名）。
+- **用途**：多个同 label 目标（如 3 个 puddle 都是 label="puddle"）按 body_name 去重，否则按 label 去重只算 1 个。
+- **通用价值**：sim 端任何多目标场景（multi-ball、multi-debris）现在能精确统计「检测到几个不同的物体」。
+
+### 关键发现：golf_ball 球体布局
+
+- **D1 工作空间偏向**：机械臂可达范围偏底盘正前方偏右（-Y）。左侧远处（+Y > 0.10m）的球 IK 不可达。
+- **布局规则**：5 个球散布在「正前方 ±0.10m、前向 ±0.10m」内，避免左侧远处。
+- **效果**：3/5 → 5/5 全部回收。
+
+### 关键发现：路径效率（stop-and-turn）
+
+- 导航 stop-and-turn 策略（heading_error > stop_turn_threshold 时停车原地转）把路径效率从 36% 提升到 **98.5%**。
+- 去程 12m 直线，实际路径 12.2m；返航 15.6m 直线（含对齐），实际 32m（一来一回）。
+
+
 
 ## 十、参数经验库
 

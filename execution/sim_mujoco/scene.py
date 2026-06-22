@@ -754,14 +754,16 @@ class SimulationScene:
         )
 
         try:
-            # 执行 3 次检测，汇总积水点
+            # 执行 3 次检测，按 body_name 去重（每个目标体计一次）
             detections_log: list[dict] = []
-            detected_labels: set[str] = set()
+            detected_bodies: set[str] = set()
             for i in range(3):
                 dets = self._sim_detector.detect()
                 for d in dets:
-                    detected_labels.add(d.label)
+                    key = d.body_name or d.label  # 优先 body_name 去重
+                    detected_bodies.add(key)
                     detections_log.append({
+                        "body_name": d.body_name,
                         "label": d.label,
                         "depth_m": float(d.depth_m),
                         "confidence": float(d.confidence),
@@ -774,18 +776,19 @@ class SimulationScene:
             )
             time.sleep(0.5)
 
-            logger.info("[inspect] 检测到 %d 个标记（去重 %d）",
-                       len(detections_log), len(detected_labels))
+            unique_count = len(detected_bodies)
+            logger.info("[inspect] 检测到 %d 个标记（按 body 去重 %d）",
+                       len(detections_log), unique_count)
 
             self._last_task_result = TaskResult(
                 scene=SCENE_RAIN_INSPECT,
                 outcome=TaskOutcome.SUCCESS,
                 details={
                     "detections": detections_log,
-                    "unique_labels": sorted(detected_labels),
-                    "puddle_count": len(detected_labels),
+                    "unique_bodies": sorted(detected_bodies),
+                    "puddle_count": unique_count,
                 },
-                message=f"巡检完成：发现 {len(detected_labels)} 个积水点",
+                message=f"巡检完成：发现 {unique_count} 个积水点",
             )
         finally:
             # 恢复感知器目标

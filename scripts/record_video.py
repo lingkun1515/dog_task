@@ -43,6 +43,7 @@ class VideoRecorder:
         height: int = 480,
         fps: int = 30,
         cam_name: Optional[str] = None,
+        context: "mujoco.MjrContext | None" = None,
     ):
         self.model = model
         self.data = data
@@ -52,10 +53,20 @@ class VideoRecorder:
         self.height = height
         self.fps = fps
 
-        # MuJoCo rendering context
+        # MuJoCo rendering context — 优先复用调用方提供的（避免 headless EGL
+        # 下重复创建 GL context 失败 gladLoadGL error）
         self._scene = mujoco.MjvScene(model, maxgeom=10000)
         self._opt = mujoco.MjvOption()
-        self._context = mujoco.MjrContext(model, mujoco.mjtFontScale.mjFONTSCALE_150)
+        self._own_context = False
+        if context is not None:
+            self._context = context
+        else:
+            try:
+                self._context = mujoco.MjrContext(model, mujoco.mjtFontScale.mjFONTSCALE_150)
+                self._own_context = True
+            except mujoco.FatalError as e:
+                logger.warning("VideoRecorder 无法创建 GL context: %s — 录制将跳过", e)
+                self._context = None
 
         # Camera setup
         self._cam = mujoco.MjvCamera()
@@ -89,8 +100,10 @@ class VideoRecorder:
         """捕获当前仿真状态的一帧 RGB 图像。
 
         Returns:
-            np.ndarray: RGB 图像 (H, W, 3), uint8
+            np.ndarray: RGB 图像 (H, W, 3), uint8；context 不可用时返回 None
         """
+        if self._context is None:
+            return None
         viewport = mujoco.MjrRect(0, 0, self.width, self.height)
         mujoco.mjv_updateScene(
             self.model, self.data, self._opt, None, self._cam,
@@ -176,6 +189,7 @@ class MultiViewRecorder:
         width: int = 640,
         height: int = 480,
         fps: int = 30,
+        context: "mujoco.MjrContext | None" = None,
     ):
         self.output_dir = Path(output_dir)
 
@@ -183,6 +197,7 @@ class MultiViewRecorder:
         self.third_person = VideoRecorder(
             model, data, output_dir,
             width=width, height=height, fps=fps,
+            context=context,
         )
 
         # 第一视角（前置相机）
@@ -190,6 +205,7 @@ class MultiViewRecorder:
             model, data, output_dir,
             width=width, height=height, fps=fps,
             cam_name=front_cam_name,
+            context=context,
         )
 
     def capture_frame(self):

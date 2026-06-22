@@ -42,6 +42,10 @@ class RobotConfig:
     home_y: float = -10.0       # 回程目标 Y
     arrival_threshold: float = 0.5  # 导航到达判定距离
     task_scene: str = DEFAULT_TASK_SCENE  # 任务场景：lawn_debris/golf_ball/rain_inspect/material_drop
+    # 导航停靠距离（米）：机器人导航到「目标点 - 朝向方向×dwell」处停下，
+    # 避免直接压在目标上方导致相机看不到。0=禁用（直接到达目标点）。
+    # 巡检类场景建议 0.5-0.8m，抓取类场景建议 0（机械臂可达范围已留余量）。
+    nav_dwell_distance: float = 0.0
 
     # 实机专用
     arm_host: str = ""
@@ -118,6 +122,7 @@ def load_robot_config(robot_id: str) -> RobotConfig:
             home_y=float(data.get("home_y", -10.0)),
             arrival_threshold=float(data.get("arrival_threshold", 0.5)),
             task_scene=task_scene,
+            nav_dwell_distance=float(data.get("nav_dwell_distance", 0.0)),
         )
 
     host = data.get("host")

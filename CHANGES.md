@@ -193,6 +193,45 @@ SCENE_OPTIONS = [
 
 _后续改动按时间倒序记录于此。_
 
+### 2026-06-22（第二轮）— 场景质量优化 + 批量评估 + 视频录制修复
+
+#### 场景质量优化
+
+- **rain_inspect 检测修复**：
+  - 新增 `RobotConfig.nav_dwell_distance`（导航停靠距离，默认 0）；rain_inspect 场景默认 0.6m
+  - `go_to_location_sim._compute_dwell_stop()` 在 home→target 方向上从 target 退 dwell 米停下，避免机器人压在目标上方导致相机看不到
+  - 效果：积水点检测从「发现 1 个（全部压在身下）」→「发现 3/3 个」
+- **Detection.body_name 字段**：`algorithms/perception/base.py` 新增字段；`SimObjectDetector._detect_from_xpos` 填充对应 MuJoCo body 名。多目标场景按 body_name 精确去重（替代按 label 去重）
+- **golf_ball 布局优化**：D1 机械臂工作空间偏向底盘正前方偏右（-Y），左侧远处（+Y>0.10m）的球 IK 不可达。5 个球收紧到「正前方 ±0.10m、前向 ±0.10m」内
+  - 效果：3/5 partial → **5/5 全部回收（success）**
+
+#### 新增：批量评估脚本
+
+- `scripts/run_batch_eval.py`：连续跑多个场景，汇总对比报告
+  - 增量保存 `batch_summary.json`（中断时仍可用）
+  - 生成人类可读的 `batch_summary.md`（汇总表 + 各场景详情）
+  - 用法：`python -m scripts.run_batch_eval --config sim_go2_d1 [--scenes golf_ball,rain_inspect]`
+
+#### 视频录制修复
+
+- `scripts/record_video.py`：`VideoRecorder` / `MultiViewRecorder` 新增 `context` 参数，复用调用方的 GL context
+  - 修复 headless EGL 下重复创建 MjrContext 导致 `gladLoadGL error`
+  - context 不可用时优雅降级（警告 + 跳过），不阻塞评估
+- `scripts/run_eval_episode.py`：setup() 把 `scene.camera._context` 传给 MultiViewRecorder
+
+#### 验证（2026-06-22 第二轮）
+
+批量评估 4 场景（配置 sim_go2_d1，目标 (12, 0)）：
+
+| 场景 | 结果 | outcome | 耗时 | 得分 | 到达误差 | 朝向误差 | 路径效率 |
+|------|------|---------|------|------|----------|----------|----------|
+| lawn_debris   | ✓ | success | 113.6s | 100 | 0.066m | 10.3° | 98.5% |
+| golf_ball     | ✓ | success | 204.9s | -  | -       | -      | -     | (5/5)
+| rain_inspect  | ✓ | success | 101.4s | 90  | 0.481m | 2.6°   | -     |
+| material_drop | ✓ | success | 107.7s | 100 | 0.079m | 10.3° | 98.0% |
+
+路径效率从首轮的 36% 提升到 ~98%（stop-and-turn 策略生效）。
+
 ### 2026-06-22 — 多任务场景（golf_ball / rain_inspect / material_drop）+ 导航 ALIGN 修复
 
 #### 新增：4 任务场景全链路支持

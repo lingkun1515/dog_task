@@ -69,14 +69,21 @@ def _lawn_debris_specs(target_pos: tuple[float, float, float]) -> list[SceneBody
 
 
 def _golf_ball_specs(target_pos: tuple[float, float, float]) -> list[SceneBodySpec]:
-    """golf_ball: 5 个白色球散布在 target 周围。"""
+    """golf_ball: 5 个白色球散布在 target 周围。
+
+    布局考量：D1 机械臂工作空间偏向底盘正前方偏右（-Y）。
+    把球散布在正前方 ±0.12m、左右 ±0.10m 内，避免左侧远处（+Y）不可达。
+    所有球都在「到达机器人坐下后，机械臂正前方 0.1-0.3m」的可靠抓取区。
+    """
     cx, cy, cz = target_pos
+    # (前向 dx, 横向 dy) — 前向正=更靠近机器人，横向 = Y
+    # 机器人到 target 时面朝 +X（target 方向），所以 +X 偏移 = 更靠近机器人
     offsets = [
-        (0.0, 0.0),
-        (0.15, 0.10),
-        (-0.12, 0.14),
-        (0.10, -0.16),
-        (-0.18, -0.08),
+        (0.00, 0.00),    # 正中央
+        (-0.08, 0.06),   # 左前近
+        (-0.08, -0.06),  # 右前近
+        (0.10, 0.08),    # 左前远
+        (0.10, -0.08),   # 右前远
     ]
     return [
         SceneBodySpec(

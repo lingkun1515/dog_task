@@ -229,8 +229,10 @@ curl -X POST http://localhost:8100/api/scene/setup \
 - [ ] 集成宇树官方 MuJoCo 仿真运控（替代当前第三方 RL policy）
 - [ ] 定位支持外部输入、导航 stack 支持外部服务（如 nav2）
 - [ ] 更新算法模块（感知、IK、抓取策略）
-- [ ] golf_ball 场景：改善多目标 IK 成功率（当前 3/5，球在工作空间边界）
-- [ ] rain_inspect 场景：机器人到达后离目标太近，相机检测积水点需后撤策略
+- [x] golf_ball 场景：5/5 全部回收（收紧布局避开工作空间边界）
+- [x] rain_inspect 场景：3/3 积水点检测（nav_dwell_distance 后撤 + body_name 去重）
+- [ ] 批量评估脚本 `scripts/run_batch_eval.py` 已就绪，可加入 CI 定期跑
+- [ ] 视频录制：shared GL context 已修复，需在 EGL-capable 环境验证
 
 ## 运行环境
 

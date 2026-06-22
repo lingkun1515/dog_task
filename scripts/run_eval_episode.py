@@ -85,12 +85,19 @@ class EpisodeRunner:
 
         if self.record_video:
             from scripts.record_video import MultiViewRecorder
+            # 复用仿真相机的 GL context（headless EGL 下必须，否则重复创建失败）
+            shared_ctx = None
+            try:
+                shared_ctx = self.scene.camera._context
+            except AttributeError:
+                pass
             self.recorder = MultiViewRecorder(
                 self.scene.robot.model,
                 self.scene.robot.data,
                 self.output_dir,
+                context=shared_ctx,
             )
-            logger.info("视频录制已启用")
+            logger.info("视频录制已启用 (shared GL context=%s)", shared_ctx is not None)
 
         # 记录 episode 元数据
         self.episode_meta = {
@@ -146,9 +153,28 @@ class EpisodeRunner:
         # 采集初始状态
         self._capture_state("task_start")
 
-        # 启动导航
-        logger.info("开始导航: target=(%.2f, %.2f)", target_x, target_y)
-        self.scene.navigate_to(target_x, target_y)
+        # 启动导航（场景化停靠点：巡检场景后撤避免压在目标上方）
+        nav_dwell = 0.0
+        if scene == "rain_inspect":
+            nav_dwell = 0.6
+        if nav_dwell > 0:
+            import math as _math
+            dx = target_x - home_x
+            dy = target_y - home_y
+            dist = _math.hypot(dx, dy)
+            if dist > nav_dwell:
+                ux, uy = dx / dist, dy / dist
+                stop_x = target_x - ux * nav_dwell
+                stop_y = target_y - uy * nav_dwell
+                logger.info("开始导航: 停靠点 (%.2f, %.2f) 距目标 %.2fm (dwell=%.2f)",
+                            stop_x, stop_y, nav_dwell, nav_dwell)
+                self.scene.navigate_to(stop_x, stop_y)
+            else:
+                logger.info("开始导航: target=(%.2f, %.2f) (dwell 太小，直达)", target_x, target_y)
+                self.scene.navigate_to(target_x, target_y)
+        else:
+            logger.info("开始导航: target=(%.2f, %.2f)", target_x, target_y)
+            self.scene.navigate_to(target_x, target_y)
         self._capture_state("nav_start")
 
         # 等待到达或超时
