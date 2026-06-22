@@ -230,6 +230,7 @@ class EpisodeRunner:
                 logger.warning("朝向对齐超时 (%.1fs): heading_error=%.1f°, 继续抓取", ALIGN_TIMEOUT, _math.degrees(h_err))
 
         # 到达后启动抓取/作业
+        task_timed_out = False
         if self.scene.state["nav_state"].value == "arrived":
             logger.info("启动作业 (scene=%s)", scene or "lawn_debris")
             self.scene.enable_detect()

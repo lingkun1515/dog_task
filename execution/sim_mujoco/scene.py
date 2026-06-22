@@ -377,9 +377,11 @@ class SimulationScene:
 
                 # -- RL policy or sliding --
                 if self._use_policy and self.policy is not None:
+                    # Policy 只控制前 18 个 PD 关节（legs+arm），不含 finger
+                    n_pd = self.robot._n_pd_joints
                     target_dof = self.policy.step(
-                        qpos_joints=self.robot.joint_positions,
-                        qvel_joints=self.robot.joint_velocities,
+                        qpos_joints=self.robot.joint_positions[:n_pd],
+                        qvel_joints=self.robot.joint_velocities[:n_pd],
                         base_quat_wxyz=self.robot.data.qpos[3:7],
                         base_ang_vel=self.robot.data.qvel[3:6],
                         vel_command=vel_cmd,

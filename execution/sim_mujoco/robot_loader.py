@@ -110,7 +110,10 @@ class RobotSim:
         self.control_decimation = cfg["control_decimation"]
 
         # Number of actuated joints (nq after the base freejoint)
-        self._n_actuated = self.model.nu  # 18 for Go2+Piper
+        # nu = 18（12 legs + 6 arm）或 20（L2 物理夹爪 +2 finger motor）
+        self._n_actuated = self.model.nu
+        # PD 控制的关节数（legs + arm，不含 finger）
+        self._n_pd_joints = len(self.default_angles)  # 18
         # qpos start index for actuated joints (7 = base freejoint)
         self._qpos_start = 7
         # qvel start index (6 = base freejoint velocity)
@@ -119,6 +122,29 @@ class RobotSim:
         self._step_counter = 0
         self._target_dof_pos = self.default_angles.copy()
         self._algo_arm_target: np.ndarray | None = None  # set by algo grasp thread
+
+        # L2 物理夹爪：手指 motor 力矩（前 18 个 ctrl 是 PD，后 2 个是 finger）
+        self._has_finger_actuators = self.model.nu > self._n_pd_joints
+        # 力矩方向：finger_l 负值=外扩（qpos 减小），finger_r 正值=外扩（qpos 增大）
+        # 闭合时反向：finger_l 正值（qpos 增大→向内），finger_r 负值（qpos 减小→向内）
+        self._finger_open_torque = 1.5     # 张开（l:负方向, r:正方向）
+        self._finger_close_torque = -2.5   # 闭合
+
+        # 手指 slide joint qpos 地址（用于初始化为张开位置）
+        if self._has_finger_actuators:
+            self._finger_l_qpos_addr = int(
+                self.model.jnt_qposadr[mujoco.mj_name2id(
+                    self.model, mujoco.mjtObj.mjOBJ_JOINT, "d1_finger_l")]
+            )
+            self._finger_r_qpos_addr = int(
+                self.model.jnt_qposadr[mujoco.mj_name2id(
+                    self.model, mujoco.mjtObj.mjOBJ_JOINT, "d1_finger_r")]
+            )
+            # 初始化为张开（range 端点）
+            self._init_finger_open()
+        else:
+            self._finger_l_qpos_addr = -1
+            self._finger_r_qpos_addr = -1
 
         # ---- Sim gripper coupling ----
         # L1 改造：用 MuJoCo weld equality 替换硬 qpos 绑定。
@@ -143,6 +169,16 @@ class RobotSim:
             self.model, mujoco.mjtObj.mjOBJ_EQUALITY, "grasp_weld"
         )
 
+    def _init_finger_open(self) -> None:
+        """把手指 slide joint 初始化到张开位置（range 外扩端）。"""
+        if self._finger_l_qpos_addr < 0:
+            return
+        # finger_l range=[-0.034, 0]，张开=qpos=-0.034（最负）
+        self.data.qpos[self._finger_l_qpos_addr] = -0.034
+        # finger_r range=[0, 0.034]，张开=qpos=0.034（最正）
+        self.data.qpos[self._finger_r_qpos_addr] = 0.034
+        mujoco.mj_forward(self.model, self.data)
+
     def reset(self) -> None:
         """Reset simulation to initial state."""
         mujoco.mj_resetData(self.model, self.data)
@@ -151,21 +187,35 @@ class RobotSim:
         self._target_dof_pos = self.default_angles.copy()
         self._algo_arm_target = None
         self._gripper_closed = False
+        # 手指初始化为张开
+        if self._has_finger_actuators:
+            self._init_finger_open()
 
     def step(self) -> None:
-        """Run one physics step with PD control."""
-        q_end = self._qpos_start + self._n_actuated
-        v_end = self._qvel_start + self._n_actuated
-
-        tau = pd_control(
-            self._target_dof_pos,
+        """Run one physics step with PD control for legs+arm, torque for fingers."""
+        # PD 控制：legs(12) + arm(6) = 18 关节
+        q_end = self._qpos_start + self._n_pd_joints
+        v_end = self._qvel_start + self._n_pd_joints
+        tau_pd = pd_control(
+            self._target_dof_pos[:self._n_pd_joints],
             self.data.qpos[self._qpos_start : q_end],
-            self.kps,
-            np.zeros(self._n_actuated),
+            self.kps[:self._n_pd_joints],
+            np.zeros(self._n_pd_joints),
             self.data.qvel[self._qvel_start : v_end],
-            self.kds,
+            self.kds[:self._n_pd_joints],
         )
-        self.data.ctrl[:] = tau
+        # 写入 ctrl：前 18 个是 PD tau
+        self.data.ctrl[:self._n_pd_joints] = tau_pd
+        # 手指 motor（L2 物理）：按 _gripper_closed 状态给力矩
+        # 张开：finger_l 负力矩（qpos→-0.034），finger_r 正力矩（qpos→+0.034）
+        # 闭合：finger_l 正力矩（qpos→0），finger_r 负力矩（qpos→0）
+        if self._has_finger_actuators:
+            if self._gripper_closed:
+                self.data.ctrl[self._n_pd_joints] = -self._finger_close_torque      # l: 正→向内
+                self.data.ctrl[self._n_pd_joints + 1] = self._finger_close_torque   # r: 负→向内
+            else:
+                self.data.ctrl[self._n_pd_joints] = -self._finger_open_torque       # l: 负→外扩
+                self.data.ctrl[self._n_pd_joints + 1] = self._finger_open_torque    # r: 正→外扩
         mujoco.mj_step(self.model, self.data)
         self._step_counter += 1
 
@@ -215,12 +265,17 @@ class RobotSim:
         v_end = self._qvel_start + self._n_actuated
         return self.data.qvel[self._qvel_start : v_end].copy()
     def set_gripper(self, angle: float) -> None:
-        """控制夹爪开合。angle<=10 视为闭合（激活 weld 抓取约束）。
+        """控制夹爪开合。angle<=10 视为闭合。
 
-        L1 改造：不再用硬 qpos 绑定，改为激活/停用 MuJoCo weld equality。
-        闭合时球通过物理约束跟随 TCP；张开时 weld 停用，球自由下落。
+        L2 物理夹爪：闭合时手指 motor 施加内向力矩，靠摩擦接触夹球；
+        张开时手指外扩，球自由下落。
+        L1 weld 兼容：若无 finger actuator（旧模型），回退到 weld equality。
         """
         self._gripper_closed = (angle <= 10.0)
+        # L2 物理夹爪：手指力矩由 step() 根据 _gripper_closed 自动施加
+        if self._has_finger_actuators:
+            return  # 物理夹爪，无需 weld
+        # L1 回退：weld equality
         self._update_grasp_weld()
 
     def _update_grasp_weld(self) -> None:

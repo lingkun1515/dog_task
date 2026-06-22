@@ -284,12 +284,26 @@
                     <!-- TCP site (matches D1Kinematics GRIPPER_TCP_OFFSET, 不渲染) -->
                     <site name="d1_tcp" pos="-0.00562 0.0 0.0706" size="0.001" rgba="0 0 0 0"/>
 
-                    <!-- Gripper fingers (fixed visual, no actuator — sim gripper is no-op) -->
-                    <body name="d1_gripper_l" pos="0.0718 -0.033778 0.0031">
-                      <geom type="mesh" mesh="d1_gripper_l" rgba="0.55 0.55 0.55 1" />
+                    <!-- L2 物理夹爪：两根手指带 slide joint（沿 link6 局部 X 轴开合）+ 摩擦接触几何。
+                         坐标系：link6 局部 X→世界 Y（夹爪开合方向），局部 Z→世界 Z（TCP 前伸方向）。
+                         TCP 在 link6 局部 (-0.00562, 0, 0.0706)。
+                         手指 body 放在 TCP 附近（局部 X=0, Z=0.0706），slide 沿局部 X。
+                         finger_l: range=[-0.034,0]，qpos=0 在中心，闭合 qpos→0，张开 qpos→-0.034
+                         finger_r: range=[0,0.034]，对称。 -->
+                    <body name="d1_gripper_l" pos="-0.00562 -0.034 0.0706">
+                      <inertial pos="0 0 0" mass="0.01" diaginertia="0.00002 0.00002 0.00002"/>
+                      <joint name="d1_finger_l" type="slide" axis="1 0 0" range="-0.034 0" damping="5" frictionloss="0.1"/>
+                      <!-- 手指内侧碰撞面（高摩擦），box 朝向：长边沿局部 Y(夹爪前后)，薄边沿局部 X(开合) -->
+                      <geom name="finger_l_contact" type="box" size="0.002 0.020 0.015" pos="0 0 0" mass="0.005"
+                            rgba="0.7 0.7 0.7 1" friction="1.8 0.5 0.3" solref="0.01 1"/>
+                      <geom type="mesh" mesh="d1_gripper_l" rgba="0.55 0.55 0.55 0.8" contype="0" conaffinity="0"/>
                     </body>
-                    <body name="d1_gripper_r" pos="0.0718 0.033022 0.0031">
-                      <geom type="mesh" mesh="d1_gripper_r" rgba="0.55 0.55 0.55 1" />
+                    <body name="d1_gripper_r" pos="-0.00562 0.034 0.0706">
+                      <inertial pos="0 0 0" mass="0.01" diaginertia="0.00002 0.00002 0.00002"/>
+                      <joint name="d1_finger_r" type="slide" axis="1 0 0" range="0 0.034" damping="5" frictionloss="0.1"/>
+                      <geom name="finger_r_contact" type="box" size="0.002 0.020 0.015" pos="0 0 0" mass="0.005"
+                            rgba="0.7 0.7 0.7 1" friction="1.8 0.5 0.3" solref="0.01 1"/>
+                      <geom type="mesh" mesh="d1_gripper_r" rgba="0.55 0.55 0.55 0.8" contype="0" conaffinity="0"/>
                     </body>
                   </body>
                 </body>
@@ -328,6 +342,11 @@
     <motor name="d1_joint4" joint="d1_joint4" ctrlrange="-12.0 12.0"/>
     <motor name="d1_joint5" joint="d1_joint5" ctrlrange="-12.0 12.0"/>
     <motor name="d1_joint6" joint="d1_joint6" ctrlrange="-12.0 12.0"/>
+
+    <!-- L2 物理夹爪手指 motor（2 slide）-->
+    <!-- ctrlrange 用力矩(N·m)：正值=闭合（左指向内+，右指向内-）-->
+    <motor name="d1_finger_l_motor" joint="d1_finger_l" ctrlrange="-3 3" gear="1"/>
+    <motor name="d1_finger_r_motor" joint="d1_finger_r" ctrlrange="-3 3" gear="1"/>
 
   </actuator>
 
