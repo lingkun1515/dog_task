@@ -439,6 +439,8 @@ class SimulationScene:
                 self.robot.step()
             # Apply gripper constraint (ball follows TCP when gripper closed)
             self.robot.apply_gripper_constraint()
+            # 钉住未被抓取的目标 body（防止 freejoint 受重力下落）
+            self.task_scene_mgr.apply_pins()
             step_counter += 1
 
             next_wake += physics_dt
@@ -622,6 +624,8 @@ class SimulationScene:
             bid = _mj.mj_name2id(self.robot.model, _mj.mjtObj.mjOBJ_BODY, current_body)
             if bid >= 0:
                 self.robot._grasp_target_body_id = bid
+            # 取消钉住当前目标（让 weld/物理接管）
+            self.task_scene_mgr.unpin_body(current_body)
             # 缩小感知器目标集
             self._sim_detector.set_targets(active_bodies, active_labels)
             self._algo_planner._state = GS.IDLE

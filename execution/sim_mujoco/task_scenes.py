@@ -181,6 +181,9 @@ class TaskSceneManager:
         self._current_scene: str | None = None
         self._body_qpos_addr: dict[str, tuple[int, int]] = {}  # body_name -> (qpos_addr, qvel_addr)
         self._build_body_addr_cache()
+        # 钉住的 body：每步重置 qpos 防止 freejoint 受重力下落
+        # {body_name: (target_pos, target_quat)}
+        self._pinned_bodies: dict[str, tuple[tuple, tuple]] = {}
 
     def _build_body_addr_cache(self) -> None:
         """缓存所有管理范围内的 body 的 qpos/qvel 地址。"""
@@ -289,10 +292,13 @@ class TaskSceneManager:
 
         self._current_scene = scene
 
-        # 应用 specs：把每个 body 写入指定 qpos + 开启碰撞
+        # 应用 specs：把每个 body 写入指定 qpos + 开启碰撞 + 钉住
+        self.unpin_all()
         for spec in specs:
             self._relocate_body(spec.body_name, spec.pos, spec.quat,
                                enable_collision=True)
+            # 钉住 body 防止 freejoint 受重力下落（抓取时 weld 会接管）
+            self.pin_body(spec.body_name, spec.pos, spec.quat)
 
         # mj_forward 让世界坐标系更新（xpos 反映新位置）
         mujoco.mj_forward(self._model, self._data)
@@ -369,6 +375,47 @@ class TaskSceneManager:
             if bid >= 0:
                 result[name] = self._data.xpos[bid].copy()
         return result
+
+    # ------------------------------------------------------------------
+    # 钉住机制：防止 freejoint body 受重力下落
+    # ------------------------------------------------------------------
+    def pin_body(self, body_name: str,
+                 pos: tuple[float, float, float] | None = None,
+                 quat: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)) -> None:
+        """钉住 body：每步重置 qpos 到指定位置，防止 freejoint 受重力下落。
+
+        pos=None 时用当前 xpos 作为钉住位置。
+        """
+        bid = mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_BODY, body_name)
+        if bid < 0:
+            return
+        if pos is None:
+            pos = tuple(self._data.xpos[bid].tolist())
+        self._pinned_bodies[body_name] = (tuple(pos), tuple(quat))
+
+    def unpin_body(self, body_name: str) -> None:
+        """取消钉住（让 body 自由运动）。"""
+        self._pinned_bodies.pop(body_name, None)
+
+    def unpin_all(self) -> None:
+        """取消所有钉住。"""
+        self._pinned_bodies.clear()
+
+    def apply_pins(self) -> None:
+        """每步调用：把钉住的 body qpos 重置到钉住位置 + 速度清零。
+
+        由 SimulationScene._loop 在 physics step 后调用。
+        """
+        for body_name, (pos, quat) in self._pinned_bodies.items():
+            addrs = self._body_qpos_addr.get(body_name)
+            if addrs is None:
+                continue
+            qpos_addr, qvel_addr = addrs
+            if qpos_addr < 0:
+                continue
+            self._data.qpos[qpos_addr:qpos_addr + 3] = pos
+            self._data.qpos[qpos_addr + 3:qpos_addr + 7] = quat
+            self._data.qvel[qvel_addr:qvel_addr + 6] = 0.0
 
 
 # ---------------------------------------------------------------------------
