@@ -361,6 +361,30 @@ python -m scripts.video_review --video logs/eval_episodes/<latest>/third_person.
 - 导航 stop-and-turn 策略（heading_error > stop_turn_threshold 时停车原地转）把路径效率从 36% 提升到 **98.5%**。
 - 去程 12m 直线，实际路径 12.2m；返航 15.6m 直线（含对齐），实际 32m（一来一回）。
 
+### 关键发现：MuJoCo 渲染后端（GLFW 隐藏窗口）
+
+- **EGL 失败**：本机虽然有 NVIDIA GPU + libEGL，但 `MUJOCO_GL=egl` 创建 MjrContext 时报 `gladLoadGL error`（原因未定位，可能是 nvidia EGL 设备权限/驱动问题）。
+- **GLFW 隐藏窗口可用**：`MUJOCO_GL=glfw` + 显式 `glfw.create_window(VISIBLE=FALSE)` + `make_context_current` → MjrContext 创建成功，`mjr_render` 正常。
+- **顺序敏感**：必须**先创建 GLFW 窗口 + make_current**，**再** import/构造 SimulationScene。否则 SimRGBDCamera 构造时的 MjrContext 失败会污染 GL 状态。
+- **共享 MjrContext**：同一 GLFW window 上不能有两个 MjrContext（segfault）。视频录制器复用 scene.camera._context，不另建。
+
+### 关键发现：scene loop 线程并发安全（_physics_paused）
+
+- **问题**：scene.start() 启动后台 loop 线程跑 mj_step；主线程的 configure_scene() 写 qpos + mj_forward 与之并发 → segfault。
+- **修复**：SimulationScene 新增 `_physics_paused` 标志，loop 内 `if not self._physics_paused: self.robot.step()`。configure_scene 暂停期间完成几何重定位，再恢复。
+- **通用价值**：任何需要在主线程修改 sim 状态（reset、scene switch、qpos 注入）的操作都应先置 `_physics_paused=True`。
+
+### 关键发现：任务视频录制（PiP + 检测框）
+
+- **设计**：`scripts/record_task_video.py` 独立跑完整 FSM 任务 + 录制。
+- **合成视频**：第三视角（跟踪相机）为主画面，第一视角（front_cam 640×480 原生分辨率）作 PiP 嵌入左上角，叠加与 web `/api/video_feed` 一致的检测框。
+- **检测框对齐**：front cam 必须用原生 640×480 渲染（匹配 SimObjectDetector 内参 fx/fy/cx/cy），否则像素坐标错位。PiP 缩放时整体缩放，框仍正确。
+- **命名**：`logs/task_videos/<scene>_<YYYYMMDDTHHMMSS>.mp4`，每个场景一个文件。
+- **阶段叠加**：每帧叠加 `[phase] t=X.Xs` 标签 + 帧号，便于人工/AI 审查定位。
+- **H.264 转码**：用 ffmpeg + libx264 转码提升兼容性；失败则保留 mp4v。
+- **验证（2026-06-22）**：4 场景全部录制成功（lawn_debris 90s / rain_inspect 69s / material_drop 81s / golf_ball 163s）。
+
+
 
 
 ## 十、参数经验库

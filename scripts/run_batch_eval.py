@@ -46,7 +46,14 @@ def parse_args():
     )
     p.add_argument("--target-x", type=float, default=12.0)
     p.add_argument("--target-y", type=float, default=0.0)
-    p.add_argument("--record-video", action="store_true", help="录制视频")
+    p.add_argument(
+        "--record-video", action="store_true", default=True,
+        help="录制任务视频（默认开启；--no-record-video 关闭）",
+    )
+    p.add_argument(
+        "--no-record-video", dest="record_video", action="store_false",
+        help="禁用视频录制（只跑评估指标）",
+    )
     p.add_argument("--max-duration", type=float, default=200.0, help="单场景最大运行时间")
     p.add_argument("--output-dir", default=None, help="输出目录（默认 logs/eval_batch/<timestamp>/）")
     return p.parse_args()
@@ -133,6 +140,8 @@ def _write_markdown_report(summaries: list[dict], batch_dir: Path, args) -> None
     for s in summaries:
         lines.append(f"### {s.get('scene', '?')}")
         lines.append(f"- 结果目录: `{s.get('scene_dir')}`")
+        if s.get("video_path"):
+            lines.append(f"- 任务视频: `{s['video_path']}`")
         if s.get("task_message"):
             lines.append(f"- 作业消息: {s['task_message']}")
         details = s.get("task_details") or {}
@@ -197,6 +206,28 @@ def main():
         summary["scene"] = scene
         summary["exit_code"] = result.returncode
         summaries.append(summary)
+
+        # 视频录制（默认开启）：调用 record_task_video 产出
+        # logs/task_videos/<scene>_<timestamp>.mp4（PiP + 检测框）
+        if args.record_video:
+            logger.info("----- 场景 %s 视频录制 -----", scene)
+            vid_cmd = [
+                sys.executable, "-m", "scripts.record_task_video",
+                "--config", args.config,
+                "--scene", scene,
+                "--target-x", str(args.target_x),
+                "--target-y", str(args.target_y),
+                "--max-duration", str(args.max_duration),
+            ]
+            logger.info("运行: %s", " ".join(vid_cmd))
+            vid_result = subprocess.run(vid_cmd, cwd=str(PROJECT_ROOT))
+            summary["video_exit_code"] = vid_result.returncode
+            # 找最新的该场景视频
+            import glob
+            vids = sorted(glob.glob(str(PROJECT_ROOT / "logs" / "task_videos" / f"{scene}_*.mp4")))
+            if vids:
+                summary["video_path"] = vids[-1]
+                logger.info("场景 %s 视频已保存: %s", scene, vids[-1])
 
         # 增量保存（中断时仍可用）
         with open(batch_dir / "batch_summary.json", "w") as f:

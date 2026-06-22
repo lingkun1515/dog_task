@@ -215,6 +215,11 @@ class SimulationScene:
         self._last_task_result: TaskResult | None = None
         # golf_ball 场景：已回收的目标体（用于 multi-grasp 进度）
         self._collected_targets: list[str] = []
+        # loop 内是否渲染相机。视频录制时主线程负责渲染，应禁用避免跨线程 GL 冲突。
+        self._render_in_loop: bool = True
+        # 物理步进暂停标志：configure_scene / start_grasp 等需要直接写 qpos +
+        # mj_forward 时，置 True 暂停 loop 的 mj_step，避免并发 segfault。
+        self._physics_paused: bool = False
 
         self._running = False
         self._thread: threading.Thread | None = None
@@ -410,7 +415,8 @@ class SimulationScene:
                 self._refresh_snapshot()
 
                 # -- render camera (throttled) --
-                if step_counter % render_mod == 0:
+                # 视频录制时主线程在渲染，禁用 loop 内渲染避免跨线程 GL 冲突
+                if step_counter % render_mod == 0 and self._render_in_loop:
                     self.camera.render()
                     if self._sim_detector is not None and self._detect_enabled:
                         try:
@@ -425,8 +431,9 @@ class SimulationScene:
                         if not self._viewer.sync(self.robot.model, self.robot.data):
                             self._running = False
 
-            # Physics step
-            self.robot.step()
+            # Physics step（暂停时不步进，避免与主线程的 qpos 写入 + mj_forward 冲突）
+            if not self._physics_paused:
+                self.robot.step()
             # Apply gripper constraint (ball follows TCP when gripper closed)
             self.robot.apply_gripper_constraint()
             step_counter += 1
@@ -477,24 +484,34 @@ class SimulationScene:
             "[configure_scene] scene=%s target=(%.2f,%.2f) home=(%.2f,%.2f)",
             scene, target_x, target_y, home_x, home_y,
         )
-        # 估算目标 z（球体/方块半径，贴近地面）
-        target_z = 0.04 if scene == SCENE_LAWN_DEBRIS else 0.03
-        home_z = 0.05
+        # 暂停物理步进，避免后台 loop 线程的 mj_step 与本处的 qpos 写入 +
+        # mj_forward 并发（segfault 风险）。
+        was_paused = self._physics_paused
+        self._physics_paused = True
+        # 让出 CPU 让 loop 线程进入「跳过 mj_step」分支
+        time.sleep(0.02)
 
-        self.task_scene_mgr.setup_scene(
-            scene,
-            target_pos=(target_x, target_y, target_z),
-            home_pos=(home_x, home_y, home_z),
-        )
-        self._active_scene = scene
+        try:
+            # 估算目标 z（球体/方块半径，贴近地面）
+            target_z = 0.04 if scene == SCENE_LAWN_DEBRIS else 0.03
+            home_z = 0.05
 
-        # 切换感知器目标集
-        self._sim_detector.set_targets(
-            self.task_scene_mgr.target_body_names,
-            self.task_scene_mgr.target_labels,
-        )
-        self._last_task_result = None
-        self._refresh_snapshot()
+            self.task_scene_mgr.setup_scene(
+                scene,
+                target_pos=(target_x, target_y, target_z),
+                home_pos=(home_x, home_y, home_z),
+            )
+            self._active_scene = scene
+
+            # 切换感知器目标集
+            self._sim_detector.set_targets(
+                self.task_scene_mgr.target_body_names,
+                self.task_scene_mgr.target_labels,
+            )
+            self._last_task_result = None
+            self._refresh_snapshot()
+        finally:
+            self._physics_paused = was_paused
 
     def enable_detect(self) -> None:
         """启用检测标注（调度端进入抓取准备阶段时调用）。"""

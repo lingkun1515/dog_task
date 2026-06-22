@@ -193,6 +193,42 @@ SCENE_OPTIONS = [
 
 _后续改动按时间倒序记录于此。_
 
+### 2026-06-22（第三轮）— 任务视频录制（PiP + 检测框）+ 并发安全修复
+
+#### 新增：自主任务视频录制器
+
+- **`scripts/record_task_video.py`**：独立跑完整 FSM 任务 + 录制合成视频
+  - **第三视角 + 第一视角 PiP**：front cam 画面（640×480 原生分辨率）嵌入第三视角左上角，加白边框 + "Front Cam" 标签
+  - **检测框与 web 一致**：PiP 内的 front 画面叠加 `SimObjectDetector.annotate_frame()` 的检测框（仅当 `_detect_enabled=True`），与 `/api/video_feed` 推流内容完全一致
+  - **阶段叠加**：每帧左上角 `[phase] t=X.Xs` + 右下角帧号，便于人工/AI 审查
+  - **命名**：`logs/task_videos/<scene>_<YYYYMMDDTHHMMSS>.mp4`
+  - H.264 转码（ffmpeg + libx264）；支持单场景 `--scene` 或全场景 `--all-scenes`
+- **`scripts/run_batch_eval.py`**：默认开启 `--record-video`，每个场景跑完评估后自动调用视频录制，视频路径写入 batch_summary
+
+#### 渲染后端发现 + 修复
+
+- **EGL 失败定位**：本机虽有 NVIDIA GPU + libEGL，但 `MUJOCO_GL=egl` 报 `gladLoadGL error`。改用 `MUJOCO_GL=glfw` + GLFW 隐藏窗口（`glfw.window_hint(VISIBLE, FALSE)`）+ `make_context_current`。
+- **import 顺序**：必须先创建 GLFW 窗口确立 GL context，再 import SimulationScene（否则 SimRGBDCamera 构造失败污染 GL 状态）。
+- **共享 MjrContext**：同一 GLFW window 上不能有两个 MjrContext（segfault）。录制器复用 `scene.camera._context`。
+- **`scripts/record_video.py`**：VideoRecorder/MultiViewRecorder 新增 `context` 参数复用外部 context；context 不可用时优雅降级。
+
+#### 并发安全修复
+
+- **`execution/sim_mujoco/scene.py`**：
+  - 新增 `_physics_paused` 标志：loop 内 `if not self._physics_paused: robot.step()`。configure_scene 在主线程改 qpos + mj_forward 前置 True，完成后再恢复，避免与后台 loop 线程的 mj_step 并发 segfault
+  - 新增 `_render_in_loop` 标志：视频录制时主线程负责渲染，置 False 避免跨线程 GL 冲突
+
+#### 验证（2026-06-22 第三轮）
+
+4 场景任务视频全部录制成功（PiP + 检测框，H.264 960×540）：
+
+| 场景 | 时长 | 帧数 | 结果 | 视频 |
+|------|------|------|------|------|
+| lawn_debris   | 90s  | 2721 | success | lawn_debris_20260622T175207.mp4 |
+| rain_inspect  | 69s  | 2087 | success (3/3 积水点) | rain_inspect_20260622T175635.mp4 |
+| material_drop | 81s  | 2443 | success | material_drop_20260622T175824.mp4 |
+| golf_ball     | 163s | 4895 | success (5/5 回收) | golf_ball_20260622T180035.mp4 |
+
 ### 2026-06-22（第二轮）— 场景质量优化 + 批量评估 + 视频录制修复
 
 #### 场景质量优化

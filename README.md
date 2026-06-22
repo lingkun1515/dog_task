@@ -217,6 +217,14 @@ scheduler 在派发前调用 `/api/scene/setup` 激活场景几何（重定位 M
 python -m scripts.run_eval_episode --config sim_go2_d1 --scene golf_ball
 python -m scripts.run_eval_episode --config sim_go2_d1 --scene rain_inspect
 
+# 录制任务视频（第三视角 + front cam PiP + 检测框，合成单个 mp4）
+MUJOCO_GL=glfw python -m scripts.record_task_video --config sim_go2_d1 --scene golf_ball
+MUJOCO_GL=glfw python -m scripts.record_task_video --config sim_go2_d1 --all-scenes  # 全部 4 个
+# 输出: logs/task_videos/<scene>_<timestamp>.mp4
+
+# 批量评估 + 视频录制（默认开启 --record-video）
+python -m scripts.run_batch_eval --config sim_go2_d1
+
 # HTTP API：场景激活
 curl -X POST http://localhost:8100/api/scene/setup \
   -H "Content-Type: application/json" \
@@ -232,7 +240,8 @@ curl -X POST http://localhost:8100/api/scene/setup \
 - [x] golf_ball 场景：5/5 全部回收（收紧布局避开工作空间边界）
 - [x] rain_inspect 场景：3/3 积水点检测（nav_dwell_distance 后撤 + body_name 去重）
 - [ ] 批量评估脚本 `scripts/run_batch_eval.py` 已就绪，可加入 CI 定期跑
-- [ ] 视频录制：shared GL context 已修复，需在 EGL-capable 环境验证
+- [x] 任务视频录制：`scripts/record_task_video.py`（第三视角 + front cam PiP + 检测框，与 web 一致）
+- [ ] 渲染后端：本机 EGL 失败，用 GLFW 隐藏窗口；实机/CI 环境若 EGL 可用可切回
 
 ## 运行环境
 
