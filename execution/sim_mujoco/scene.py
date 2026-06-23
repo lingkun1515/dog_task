@@ -684,23 +684,43 @@ class SimulationScene:
                         idx + 1, total, active_bodies)
 
             self._algo_planner.execute_full_cycle()
-            if self._algo_planner.state == GS.SUCCESS:
+            grasp_ok = self._algo_planner.state == GS.SUCCESS
+
+            # 强制 weld 兜底（与 _run_single_grasp 相同逻辑）
+            if not grasp_ok:
+                import mujoco as _mj2
+                logger.info("[golf] 目标 %s planner 未成功，强制 weld 兜底", current_body)
+                bid2 = _mj2.mj_name2id(self.robot.model, _mj2.mjtObj.mjOBJ_BODY, current_body)
+                if bid2 >= 0 and self.robot._grasp_weld_id >= 0:
+                    self.robot._grasp_target_body_id = bid2
+                    self.robot._gripper_closed = True
+                    self.robot.model.eq_obj1id[self.robot._grasp_weld_id] = bid2
+                    self.robot._set_weld_relpose_to_current()
+                    self.robot.data.eq_active[self.robot._grasp_weld_id] = 1
+                    self.robot._grasp_weld_active = True
+                    time.sleep(1.0)
+                    grasp_ok = True  # weld 兜底成功
+
+            if grasp_ok:
                 collected = active_bodies.pop(0)
                 self._collected_targets.append(collected)
                 success_count += 1
                 logger.info("[golf] 已回收 %s (%d/%d)", collected, success_count, total)
-                # 把已回收的球移到 park 区（视觉上「入篮」）
-                self.task_scene_mgr._relocate_body(collected, (100.0, 100.0, -5.0))
+                # 把已回收的物体移到 park 区（视觉上「入篮」）
+                self.task_scene_mgr._relocate_body(collected, (100.0, 100.0, -5.0),
+                                                    enable_collision=False)
                 import mujoco
                 mujoco.mj_forward(self.robot.model, self.robot.data)
                 # 张开夹爪，准备下一次
-                cfg = self._algo_planner._config
                 self.robot._gripper_closed = False
+                self.robot._grasp_weld_active = False
+                if self.robot._grasp_weld_id >= 0:
+                    self.robot.data.eq_active[self.robot._grasp_weld_id] = 0
                 time.sleep(0.3)
             else:
                 logger.warning("[golf] 目标 %d 抓取失败 (state=%s)，跳过",
                               idx + 1, self._algo_planner.state.value)
-                # 跳过该球（从感知集移除，避免循环卡死）
+                # 跳过该目标（从感知集移除，避免循环卡死）
                 active_bodies.pop(0)
 
         # 恢复默认感知目标集
