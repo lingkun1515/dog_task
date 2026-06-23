@@ -164,9 +164,10 @@ _SCENE_BODY_REGISTRY = {
     ],
 }
 
-# park 区所有预放置 body（首次初始化时把除 target_sphere 外的全部归位）
+# park 区所有预放置 body（含 target_sphere，场景切换时全部归位）
 _PARKABLE_BODIES = (
-    [f"golf_ball_{i}" for i in range(5)]
+    ["target_sphere"]  # 原默认 body，现在 park 直到被某场景显式使用
+    + [f"golf_ball_{i}" for i in range(5)]
     + ["payload_box"]
     + ["debris_box_0", "debris_box_1", "debris_box_2"]
     + ["debris_bottle_0", "debris_bottle_1"]
@@ -367,17 +368,17 @@ class TaskSceneManager:
         self._current_scene = None
 
     def reset_to_default(self) -> None:
-        """重置为默认 lawn_debris 场景（保持向后兼容）。
+        """重置为默认 lawn_debris 场景。
 
-        lawn_debris 现在用 debris_branch（不再 target_sphere），
-        但 target_sphere 仍在 MJCF 中作为初始 body，这里一并 park。
+        lawn_debris 现在用 debris_branch。所有 body（含 target_sphere）park。
         """
         # park 所有 body（关闭碰撞）
         for name in _PARKABLE_BODIES:
             self._relocate_body(name, _PARK_POS, _PARK_QUAT, enable_collision=False)
-        self._current_scene = SCENE_LAWN_DEBRIS
-        mujoco.mj_forward(self._model, self._data)
-        logger.info("[TaskScene] 已重置为默认场景: lawn_debris")
+        # 激活 lawn_debris 的 debris_branch
+        self.setup_scene(SCENE_LAWN_DEBRIS, target_pos=(12, 0, 0.04),
+                         home_pos=(0, -10, 0.05))
+        logger.info("[TaskScene] 已重置为默认场景: lawn_debris (debris_branch)")
 
     def get_target_positions(self) -> dict[str, np.ndarray]:
         """返回当前场景下所有目标体的世界坐标（用于分析/日志）。"""

@@ -97,11 +97,11 @@
     <!-- material_drop 场景：红色物料方块（material_drop 场景定位到 home，被抓取→携带→投放） -->
     <body name="payload_box" pos="100 100 -5"><freejoint/><geom name="payload_geom" type="box" size="0.03 0.03 0.03" rgba="0.85 0.15 0.15 1" mass="0.01" contype="0" conaffinity="0"/></body>
 
-    <!-- lawn_debris 专属：树枝/长条异物（capsule 细长，棕色，模拟草坪上的断枝） -->
-    <body name="debris_branch" pos="100 100 -5"><freejoint/><geom name="debris_branch_geom" type="capsule" fromto="-0.06 0 0 0.06 0 0" size="0.012" rgba="0.45 0.30 0.15 1" mass="0.012" contype="0" conaffinity="0"/></body>
+    <!-- lawn_debris 专属：树枝/长条异物（capsule，棕色，模拟草坪上的断枝） -->
+    <body name="debris_branch" pos="100 100 -5"><freejoint/><geom name="debris_branch_geom" type="capsule" fromto="-0.08 0 0 0.08 0 0" size="0.018" rgba="0.40 0.25 0.12 1" mass="0.015" contype="0" conaffinity="0"/></body>
 
-    <!-- mixed_debris 专属球（不再借用 target_sphere）-->
-    <body name="debris_ball" pos="100 100 -5"><freejoint/><geom name="debris_ball_geom" type="sphere" size="0.020" rgba="0.95 0.75 0.05 1" mass="0.004" contype="0" conaffinity="0"/></body>
+    <!-- mixed_debris 专属球（不再借用 target_sphere，金黄色）-->
+    <body name="debris_ball" pos="100 100 -5"><freejoint/><geom name="debris_ball_geom" type="sphere" size="0.022" rgba="0.95 0.75 0.05 1" mass="0.005" contype="0" conaffinity="0"/></body>
 
     <!-- L3 多目标类型：方块/盒子（杂物场景用）。park 区初始 contype=0 不碰撞，激活时改 -->
     <body name="debris_box_0" pos="100 100 -5"><freejoint/><geom name="debris_box_geom_0" type="box" size="0.025 0.025 0.025" rgba="0.6 0.3 0.1 1" mass="0.008" contype="0" conaffinity="0"/></body>

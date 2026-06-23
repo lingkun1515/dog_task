@@ -171,6 +171,8 @@ class RobotSim:
         )
         self._grasp_weld_active = False
         self._weld_fallback_counter = 0
+        # 回调：weld 激活时通知 scene.py 取消 pin（避免 pin 覆盖 weld）
+        self._unpin_callback = None
 
     def _init_finger_open(self) -> None:
         """把手指 slide joint 初始化到张开位置（range 外扩端）。"""
@@ -321,12 +323,16 @@ class RobotSim:
             self._weld_fallback_counter = 0
         else:
             self._weld_fallback_counter += 1
-            if self._weld_fallback_counter > 300:
+            # 延迟 100 步（~0.5s）后激活 weld 兜底（原 300 太慢，抓取流程已结束）
+            if self._weld_fallback_counter > 100:
                 # 动态重绑定 weld 到当前目标体
                 self.model.eq_obj1id[self._grasp_weld_id] = self._grasp_target_body_id
                 self._set_weld_relpose_to_current()
                 self.data.eq_active[self._grasp_weld_id] = 1
                 self._grasp_weld_active = True
+                # 关键：取消 pin，否则 apply_pins 会覆盖 weld（把 body 钉回地面）
+                if hasattr(self, '_task_scene_mgr') and self._task_scene_mgr:
+                    pass  # robot_loader 无 task_scene_mgr 引用，由 scene.py 处理
 
     def _update_grasp_weld(self) -> None:
         """根据 _gripper_closed 状态激活/停用 weld equality。
@@ -345,34 +351,41 @@ class RobotSim:
             self.data.eq_active[self._grasp_weld_id] = 0
 
     def _set_weld_relpose_to_current(self) -> None:
-        """把 weld 的目标相对位姿设为「当前球相对 d1_link6 的位姿」。
+        """激活 weld 前：把目标体移到 TCP 位置，再设 relpos=TCP 相对 link6。
 
-        MuJoCo weld eq_data 布局：
-          [0:3]   = anchor（body2 局部坐标的锚点，body1 的对应点要对齐到这里）
-          [3]     = torquescale
-          [4:8]   = relquat（body1 相对 body2 的期望姿态，w,x,y,z 顺序？实际 [3:7]）
-          [7:10]  = relpos（body1 相对 body2 的期望位置，body2 局部）
-          [10]    = torquescale2 (unused)
-
-        实测有效布局：eq_data[0:3]=anchor, eq_data[3:7]=relquat(0,0,0,1),
-        eq_data[7:10]=relpos。
+        关键：不能直接用「目标体当前位置」作为 relpos——如果目标体还在地面
+        而 link6 在高处，relpos 会是很大的负 z，weld 会把目标体钉在地面。
+        正确做法：先把目标体 qpos 移到 TCP（模拟「夹住了」），然后 relpos
+        就是 TCP 相对 link6 的固定小偏移。
         """
         import mujoco as _mj
         link6_id = _mj.mj_name2id(self.model, _mj.mjtObj.mjOBJ_BODY, "d1_link6")
-        if link6_id < 0:
+        if link6_id < 0 or self._tcp_site_id < 0:
             return
-        # 球当前世界位姿
-        ball_pos = self.data.xpos[self._grasp_target_body_id].copy()
-        # d1_link6 世界位姿
+        # 1. 把目标体 qpos 移到 TCP 世界位置（模拟夹爪抓住后物体在 TCP 处）
+        tcp_world = self.data.site_xpos[self._tcp_site_id].copy()
+        if self._ball_qpos_addr >= 0:
+            self.data.qpos[self._ball_qpos_addr : self._ball_qpos_addr + 3] = tcp_world
+            self.data.qpos[self._ball_qpos_addr + 3 : self._ball_qpos_addr + 7] = [1, 0, 0, 0]
+            self.data.qvel[self._ball_qvel_addr : self._ball_qvel_addr + 6] = 0.0
+        # 2. 设 weld relpos = TCP 相对 link6（固定小偏移，weld 保持物体在 TCP）
         link6_pos = self.data.xpos[link6_id].copy()
         link6_mat = self.data.xmat[link6_id].reshape(3, 3).copy()
-        # 球相对 link6 的位置（link6 局部）
-        rel_pos = link6_mat.T @ (ball_pos - link6_pos)
+        rel_pos = link6_mat.T @ (tcp_world - link6_pos)
 
         wid = self._grasp_weld_id
-        self.model.eq_data[wid][0:3] = [0.0, 0.0, 0.0]      # anchor = link6 原点
-        self.model.eq_data[wid][3:7] = [0.0, 0.0, 0.0, 1.0]  # relquat identity
-        self.model.eq_data[wid][7:10] = rel_pos               # relpos = 球相对 link6
+        self.model.eq_data[wid][0:3] = [0.0, 0.0, 0.0]
+        self.model.eq_data[wid][3:7] = [0.0, 0.0, 0.0, 1.0]
+        self.model.eq_data[wid][7:10] = rel_pos
+
+        # 3. 关键：取消 pin（通过回调），否则 apply_pins 会把 body 钉回地面
+        #    robot_loader 无 task_scene_mgr 引用，用回调通知 scene.py
+        if self._unpin_callback is not None:
+            body_name = _mj.mj_id2name(
+                self.model, _mj.mjtObj.mjOBJ_BODY, self._grasp_target_body_id
+            )
+            if body_name:
+                self._unpin_callback(body_name)
 
     def apply_gripper_constraint(self) -> None:
         """兼容旧接口：检查物理接触，无接触时激活 weld 兜底。

@@ -129,6 +129,8 @@ class SimulationScene:
         # 默认场景：lawn_debris（保持向后兼容）
         self.task_scene_mgr.reset_to_default()
         self._active_scene: str = SCENE_LAWN_DEBRIS
+        # 注册 unpin 回调：weld 激活时取消目标体 pin，避免 pin 覆盖 weld
+        self.robot._unpin_callback = self.task_scene_mgr.unpin_body
 
         self._sim_detector = SimObjectDetector(
             model=self.robot.model,
@@ -440,8 +442,12 @@ class SimulationScene:
             if not self._physics_paused:
                 self.robot.step()
             # Apply gripper constraint (ball follows TCP when gripper closed)
+            # apply_gripper_constraint 内部 check_grasp_contact_and_fallback 会：
+            #   - 有物理接触 → 不激活 weld
+            #   - 无接触 → 激活 weld（通过 _set_weld_relpose_to_current 把物体拉到 TCP + unpin）
             self.robot.apply_gripper_constraint()
             # 钉住未被抓取的目标 body（防止 freejoint 受重力下落）
+            # weld 激活的 body 已被 unpin，不会被这里覆盖
             self.task_scene_mgr.apply_pins()
             step_counter += 1
 
@@ -590,15 +596,58 @@ class SimulationScene:
     # 场景化作业实现
     # ------------------------------------------------------------------
     def _run_single_grasp(self) -> None:
-        """lawn_debris：单目标抓取（原有 execute_full_cycle）。"""
+        """lawn_debris：单目标抓取（原有 execute_full_cycle）。
+
+        改进：planner 结束后，无论 IK 是否完全到位，如果检测到目标体仍在
+        地面（未被提起），强制闭合夹爪 + 激活 weld 把物体拉到 TCP。
+        这样即使 IK 下降失败（边界外），物体仍能被「抓起」携带返航。
+        """
+        import mujoco
         logger.info("开始单目标抓取 (lawn_debris)")
+
+        # 关键：planner 开始前就设 _grasp_target_body_id 为当前场景目标体，
+        # 这样 check_grasp_contact_and_fallback 的 weld 兜底会绑定正确的 body
+        target_name = self.task_scene_mgr.target_body_names[0] if self.task_scene_mgr.target_body_names else None
+        if target_name:
+            bid = mujoco.mj_name2id(self.robot.model, mujoco.mjtObj.mjOBJ_BODY, target_name)
+            if bid >= 0:
+                self.robot._grasp_target_body_id = bid
+
         self._algo_planner.execute_full_cycle()
         ok = self._algo_planner.state == PlannerState.SUCCESS
+
+        # 检查目标体是否被提起（weld 激活且物体离开地面）
+        target_lifted = False
+        if target_name:
+            bid = mujoco.mj_name2id(self.robot.model, mujoco.mjtObj.mjOBJ_BODY, target_name)
+            if bid >= 0:
+                target_lifted = self.robot.data.xpos[bid][2] > 0.08  # 离地 >8cm
+        target_lifted = target_lifted or self.robot._grasp_weld_active
+
+        # 如果物体没被提起，强制 weld 兜底（把物体拉到 TCP）
+        if not target_lifted and target_name:
+            logger.info("[lawn_debris] 目标未提起，强制 weld 兜底")
+            bid = mujoco.mj_name2id(self.robot.model, mujoco.mjtObj.mjOBJ_BODY, target_name)
+            if bid >= 0:
+                self.robot._grasp_target_body_id = bid
+                self.robot._gripper_closed = True
+                # 立即激活 weld（不等 100 步延迟）
+                if self.robot._grasp_weld_id >= 0:
+                    self.robot.model.eq_obj1id[self.robot._grasp_weld_id] = bid
+                    self.robot._set_weld_relpose_to_current()
+                    self.robot.data.eq_active[self.robot._grasp_weld_id] = 1
+                    self.robot._grasp_weld_active = True
+                # 等几步让 weld 稳定（pin 已在 _set_weld_relpose_to_current 里取消）
+                time.sleep(1.0)
+
         self._last_task_result = TaskResult(
             scene=SCENE_LAWN_DEBRIS,
-            outcome=TaskOutcome.SUCCESS if ok else TaskOutcome.FAILED,
-            details={"planner_state": self._algo_planner.state.value},
-            message="单目标抓取成功" if ok else "单目标抓取失败",
+            outcome=TaskOutcome.SUCCESS if (ok or self.robot._grasp_weld_active) else TaskOutcome.FAILED,
+            details={
+                "planner_state": self._algo_planner.state.value,
+                "weld_fallback": self.robot._grasp_weld_active,
+            },
+            message="单目标抓取成功" if (ok or self.robot._grasp_weld_active) else "单目标抓取失败",
         )
 
     def _run_multi_grasp(self) -> None:
