@@ -60,15 +60,12 @@ class SceneBodySpec:
 
 
 def _lawn_debris_specs(target_pos: tuple[float, float, float]) -> list[SceneBodySpec]:
-    """lawn_debris: 单个树枝/长条异物（capsule 细长，棕色）。
-
-    不再用 target_sphere（黄色球），改用 debris_branch 模拟草坪上的断枝，
-    形状/颜色与 golf_ball（白球）、mixed_debris（多色杂物）区分。
-    """
+    """lawn_debris: 单个树枝/长条异物（capsule，棕色）。"""
+    # capsule radius=0.028，z 需 ≥ 0.028 贴地
     return [
         SceneBodySpec(
             body_name="debris_branch",
-            pos=target_pos,
+            pos=(target_pos[0], target_pos[1], 0.028),
             label="branch",
         )
     ]
@@ -131,16 +128,16 @@ def _mixed_debris_specs(target_pos: tuple[float, float, float]) -> list[SceneBod
     """
     cx, cy, _cz = target_pos
     return [
-        # 球（专属 debris_ball，金黄色）
-        SceneBodySpec(body_name="debris_ball", pos=(cx, cy, 0.020), label="ball"),
-        # 方块（棕色，小积木）
-        SceneBodySpec(body_name="debris_box_0", pos=(cx + 0.10, cy + 0.06, 0.025), label="box"),
-        # 方块（灰色，更小）
-        SceneBodySpec(body_name="debris_box_1", pos=(cx - 0.08, cy + 0.08, 0.020), label="box"),
-        # 圆柱/瓶（蓝色，直立）
-        SceneBodySpec(body_name="debris_bottle_0", pos=(cx + 0.12, cy - 0.07, 0.050), label="bottle"),
-        # 袋装（棕色，capsule 近似）
-        SceneBodySpec(body_name="debris_bag_0", pos=(cx - 0.10, cy - 0.06, 0.022), label="bag"),
+        # 球（专属 debris_ball，金黄色，r=0.028）
+        SceneBodySpec(body_name="debris_ball", pos=(cx, cy, 0.028), label="ball"),
+        # 方块（棕色，30mm 半边长）
+        SceneBodySpec(body_name="debris_box_0", pos=(cx + 0.10, cy + 0.06, 0.030), label="box"),
+        # 方块（灰色，25mm）
+        SceneBodySpec(body_name="debris_box_1", pos=(cx - 0.08, cy + 0.08, 0.025), label="box"),
+        # 圆柱/瓶（蓝色，h=60mm）
+        SceneBodySpec(body_name="debris_bottle_0", pos=(cx + 0.12, cy - 0.07, 0.060), label="bottle"),
+        # 袋装（棕色 capsule）
+        SceneBodySpec(body_name="debris_bag_0", pos=(cx - 0.10, cy - 0.06, 0.028), label="bag"),
     ]
 
 

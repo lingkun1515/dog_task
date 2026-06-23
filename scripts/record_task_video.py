@@ -116,14 +116,14 @@ class TaskVideoRecorder:
             self._scene = mujoco.MjvScene(model, maxgeom=10000)
             self._opt = mujoco.MjvOption()
 
-        # 第三视角（跟踪机器人）
+        # 第三视角（跟踪机器人，拉近让目标物体更可见）
         self._third_cam = mujoco.MjvCamera()
         self._third_cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
         bid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, track_body_name)
         self._third_cam.trackbodyid = bid if bid >= 0 else 0
-        self._third_cam.distance = 3.5
-        self._third_cam.elevation = -20
-        self._third_cam.azimuth = 130
+        self._third_cam.distance = 2.0   # 拉近（原 3.5 太远，小物体看不见）
+        self._third_cam.elevation = -25  # 更低视角，看地面物体
+        self._third_cam.azimuth = 90     # 侧面视角，看机械臂和前方目标
 
         # 第一视角（前置相机）— 用相机原生分辨率渲染（640×480），
         # 这样 SimObjectDetector.annotate_frame 的像素坐标（基于相机内参）
@@ -489,6 +489,19 @@ def _run_task_with_recording(
         # === 阶段 2：作业（抓取/巡检/投放） ===
         task_ok = False
         if arrived:
+            # 朝向对齐（面朝 target，与 run_eval_episode 一致）
+            import math as _m
+            robot_pos = scene_obj.state["base_pos"]
+            goal_heading = _m.atan2(target_y - robot_pos[1], target_x - robot_pos[0])
+            logger.info("[%s] 朝向对齐 %.1f°", scene, _m.degrees(goal_heading))
+            scene_obj.start_heading_align(goal_heading)
+            align_start = time.time()
+            while time.time() - align_start < 8.0:
+                recorder.capture_frame(phase_label="heading_align")
+                if scene_obj.state["nav_state"].value == "arrived":
+                    break
+                time.sleep(1.0 / fps)
+
             logger.info("[%s] 启动作业", scene)
             scene_obj.start_grasp()
             time.sleep(0.5)
