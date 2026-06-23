@@ -196,25 +196,34 @@ class SimulationScene:
         default_legs = np.array(default_angles[:12], dtype=np.float64)
         self._standing_pose = default_legs.copy()
         self._sit_pose = default_legs.copy()
-        # Rear legs fold more (thigh increases, calf more negative)
-        # L3+ 改进：加深折叠度（1.5→1.8, -2.2→-2.5）让躯干降低 ~5cm，
-        # 使手臂基座从 z=0.28 降到 z=0.23，球相对 arm z 从 -0.24 抬到 -0.19（IK 可达）。
+        # 四脚全趴：前后腿都深折叠，躯干降到最低（arm_base 最低，IK 可达范围最大）
+        # 后腿（RR/RL）：thigh 1.8, calf -2.5（深折叠，承重）
         self._sit_pose[6] = 0.0    # RR_hip
-        self._sit_pose[7] = 1.8    # RR_thigh (standing=1.0, 原 sit=1.5)
-        self._sit_pose[8] = -2.5   # RR_calf  (standing=-1.5, 原 sit=-2.2)
+        self._sit_pose[7] = 1.8    # RR_thigh
+        self._sit_pose[8] = -2.5   # RR_calf
         self._sit_pose[9] = 0.0    # RL_hip
         self._sit_pose[10] = 1.8   # RL_thigh
         self._sit_pose[11] = -2.5  # RL_calf
-        # Front legs slightly more bent for stability
-        self._sit_pose[1] = 1.0    # FR_thigh (standing=0.8)
-        self._sit_pose[2] = -1.7   # FR_calf  (standing=-1.5)
-        self._sit_pose[4] = 1.0    # FL_thigh
-        self._sit_pose[5] = -1.7   # FL_calf
+        # 前腿（FR/FL）：也深折叠趴下（thigh 1.6, calf -2.3）
+        # 前脚趴下让躯干前倾降低，arm_base 更低 + 更靠前
+        self._sit_pose[1] = 1.6    # FR_thigh (standing=0.8)
+        self._sit_pose[2] = -2.3   # FR_calf  (standing=-1.5)
+        self._sit_pose[4] = 1.6    # FL_thigh
+        self._sit_pose[5] = -2.3   # FL_calf
         logger.info("坐下姿态已配置")
 
         # ---- keyboard teleop (only in GUI mode) ----
         self._kb_controller = None
         self._kb_enabled = False
+
+        # ---- 抓取几何参数（坐下后 arm_base 相对 base 的偏移 + IK 最佳前向距离）----
+        # 这些值在第一次坐下后校准（_calibrate_grasp_geometry）
+        # arm_base 相对 base 的偏移（坐下姿态下）
+        self._arm_base_offset: np.ndarray | None = None  # [dx, dy, dz]
+        # IK 最佳前向距离范围（arm frame，物体相对 arm_base 的 x）
+        self._grasp_dist_min: float = 0.09  # 最近可达（arm frame x）
+        self._grasp_dist_optimal: float = 0.15  # 最佳（IK 到位 + 余量）
+        self._grasp_dist_max: float = 0.25  # 最远舒适可达
 
         # ---- Task execution state ----
         self._last_task_result: TaskResult | None = None
@@ -565,10 +574,21 @@ class SimulationScene:
 
         def _run():
             try:
-                # 抓取/投放场景：等待坐下稳定
+                # 抓取/投放场景：先微调到最佳抓取位置 + 坐下
+                if self.task_scene_mgr.requires_grasp:
+                    # 微调接近目标（几何预计算最佳停靠点）
+                    target_names = self.task_scene_mgr.target_body_names
+                    if target_names:
+                        import mujoco as _mj3
+                        bid = _mj3.mj_name2id(self.robot.model, _mj3.mjtObj.mjOBJ_BODY, target_names[0])
+                        if bid >= 0:
+                            tp = self.robot.data.xpos[bid][:2]
+                            logger.info("微调接近目标 (%.2f, %.2f)", tp[0], tp[1])
+                            self.fine_approach(tp[0], tp[1])
                 if self.task_scene_mgr.requires_grasp or self.task_scene_mgr.requires_drop:
                     logger.info("等待坐下稳定...")
-                    time.sleep(2.5)
+                    self._sit_override = self._sit_pose.copy()
+                    time.sleep(3.0)
                     logger.info("坐下完成，开始作业")
                 worker()
             except Exception as e:
@@ -591,6 +611,106 @@ class SimulationScene:
         self._algo_thread = threading.Thread(target=_run, daemon=True)
         self._algo_thread.start()
         self._refresh_snapshot()
+
+    # ------------------------------------------------------------------
+    # 抓取几何优化：最佳距离预计算 + 微调接近
+    # ------------------------------------------------------------------
+    def _calibrate_grasp_geometry(self) -> None:
+        """坐下后校准 arm_base 相对 base 的偏移（用于计算最佳抓取停靠点）。
+
+        在 sit_down 稳定后调用，记录 arm_base 在 base 坐标系下的偏移。
+        """
+        kin = self._algo_planner._kinematics
+        base_pos = self.robot.base_position
+        arm_base = kin.arm_base_world_pos
+        # arm_base 相对 base 的偏移（世界坐标 → 近似 base 局部，忽略 yaw）
+        base_yaw = self.robot.base_yaw
+        dx_world = arm_base[0] - base_pos[0]
+        dy_world = arm_base[1] - base_pos[1]
+        dz_world = arm_base[2] - base_pos[2]
+        # 转换到 base 局部（base 朝向 yaw）
+        cos_y, sin_y = np.cos(base_yaw), np.sin(base_yaw)
+        dx_local = cos_y * dx_world + sin_y * dy_world
+        dy_local = -sin_y * dx_world + cos_y * dy_world
+        self._arm_base_offset = np.array([dx_local, dy_local, dz_world])
+        logger.info("[grasp_geom] arm_base 相对 base: %s (坐下姿态)",
+                    np.round(self._arm_base_offset, 3))
+
+    def compute_grasp_stop_point(
+        self, target_x: float, target_y: float,
+    ) -> tuple[float, float, float]:
+        """计算机器人坐下后能最佳抓取 target 的停靠点。
+
+        几何推导：
+        - 坐下后 arm_base 在 base 前方 dx_local 米（通常 ~0.005m）
+        - IK 最佳前向距离 grasp_dist_optimal（arm frame x，通常 0.15m）
+        - 所以物体应在 base 前方 dx_local + grasp_dist_optimal 米
+        - 停靠点 = target 后退 (dx_local + grasp_dist_optimal) 米（沿 base→target 方向）
+
+        Returns:
+            (stop_x, stop_y, goal_heading): 停靠坐标 + 朝向（rad，面朝 target）
+        """
+        base_pos = self.robot.base_position
+        # base → target 方向
+        dx = target_x - base_pos[0]
+        dy = target_y - base_pos[1]
+        dist = np.hypot(dx, dy)
+        if dist < 0.01:
+            return base_pos[0], base_pos[1], self.robot.base_yaw
+        ux, uy = dx / dist, dy / dist  # 单位向量
+
+        # arm_base 在 base 前方的偏移
+        arm_forward = 0.005  # 默认值
+        if self._arm_base_offset is not None:
+            arm_forward = self._arm_base_offset[0]
+
+        # 最佳停靠距离：物体在 arm 前方 grasp_dist_optimal 处
+        # 停靠点 = target - (arm_forward + grasp_dist_optimal) × 方向
+        stop_dist = arm_forward + self._grasp_dist_optimal
+        # 如果 target 太近，不要后退太多（至少留 0.1m）
+        actual_stop = min(stop_dist, max(dist - 0.05, 0.1))
+        stop_x = target_x - ux * actual_stop
+        stop_y = target_y - uy * actual_stop
+        goal_heading = float(np.arctan2(dy, dx))
+        logger.info("[grasp_geom] 停靠点 (%.2f, %.2f), 距 target %.2fm, 朝向 %.1f°",
+                    stop_x, stop_y, actual_stop, np.degrees(goal_heading))
+        return stop_x, stop_y, goal_heading
+
+    def fine_approach(
+        self, target_x: float, target_y: float, max_steps: int = 500,
+    ) -> bool:
+        """微调接近：缓慢走到最佳抓取停靠点 + 朝向对齐。
+
+        在导航到达目标区域后、坐下前调用。
+        用低速 RL policy 缓慢走到 compute_grasp_stop_point 计算的停靠点，
+        然后原地转向面朝 target。
+
+        Returns:
+            True 如果成功到达停靠点
+        """
+        stop_x, stop_y, goal_heading = self.compute_grasp_stop_point(target_x, target_y)
+        # 低速导航到停靠点
+        logger.info("[fine_approach] 微调到停靠点 (%.2f, %.2f)", stop_x, stop_y)
+        self.nav.set_target(stop_x, stop_y, arrival_threshold=0.08)
+        start = time.time()
+        while time.time() - start < max_steps * 0.01:
+            st = self.state
+            if st["nav_state"].value == "arrived":
+                break
+            if st["nav_state"].value == "error":
+                logger.warning("[fine_approach] 微调导航失败")
+                return False
+            time.sleep(0.05)
+        # 原地转向面朝 target
+        logger.info("[fine_approach] 对齐朝向 %.1f°", np.degrees(goal_heading))
+        self.nav.start_heading_align(goal_heading)
+        for _ in range(300):
+            if self.state["nav_state"].value == "arrived":
+                break
+            time.sleep(0.03)
+        # 校准抓取几何
+        self._calibrate_grasp_geometry()
+        return True
 
     # ------------------------------------------------------------------
     # 场景化作业实现

@@ -264,6 +264,24 @@ class TaskSceneManager:
     # ------------------------------------------------------------------
     # 场景几何激活/停用
     # ------------------------------------------------------------------
+    # 各场景的地面材质名
+    _GROUND_MATERIALS = {
+        SCENE_LAWN_DEBRIS: "grass_mat",
+        SCENE_GOLF_BALL: "grass_mat",
+        SCENE_RAIN_INSPECT: "wet_mat",
+        SCENE_MATERIAL_DROP: "concrete_mat",
+        SCENE_MIXED_DEBRIS: "grass_mat",
+    }
+
+    def set_ground_material(self, material_name: str) -> None:
+        """切换地面 geom 的材质（让不同场景视觉差异化）。"""
+        import mujoco as _mj
+        gid = _mj.mj_name2id(self._model, _mj.mjtObj.mjOBJ_GEOM, "floor")
+        mid = _mj.mj_name2id(self._model, _mj.mjtObj.mjOBJ_MATERIAL, material_name)
+        if gid >= 0 and mid >= 0:
+            self._model.geom_matid[gid] = mid
+            logger.info("[TaskScene] 地面材质切换为: %s", material_name)
+
     def setup_scene(
         self,
         scene: str,
@@ -300,6 +318,10 @@ class TaskSceneManager:
             )
 
         self._current_scene = scene
+
+        # 切换地面材质（场景视觉差异化）
+        ground_mat = self._GROUND_MATERIALS.get(scene, "grass_mat")
+        self.set_ground_material(ground_mat)
 
         # 应用 specs：把每个 body 写入指定 qpos + 开启碰撞 + 钉住
         self.unpin_all()
