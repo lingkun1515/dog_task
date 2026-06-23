@@ -195,12 +195,14 @@ class SimulationScene:
         self._standing_pose = default_legs.copy()
         self._sit_pose = default_legs.copy()
         # Rear legs fold more (thigh increases, calf more negative)
+        # L3+ 改进：加深折叠度（1.5→1.8, -2.2→-2.5）让躯干降低 ~5cm，
+        # 使手臂基座从 z=0.28 降到 z=0.23，球相对 arm z 从 -0.24 抬到 -0.19（IK 可达）。
         self._sit_pose[6] = 0.0    # RR_hip
-        self._sit_pose[7] = 1.5    # RR_thigh (standing=1.0)
-        self._sit_pose[8] = -2.2   # RR_calf  (standing=-1.5)
+        self._sit_pose[7] = 1.8    # RR_thigh (standing=1.0, 原 sit=1.5)
+        self._sit_pose[8] = -2.5   # RR_calf  (standing=-1.5, 原 sit=-2.2)
         self._sit_pose[9] = 0.0    # RL_hip
-        self._sit_pose[10] = 1.5   # RL_thigh
-        self._sit_pose[11] = -2.2  # RL_calf
+        self._sit_pose[10] = 1.8   # RL_thigh
+        self._sit_pose[11] = -2.5  # RL_calf
         # Front legs slightly more bent for stability
         self._sit_pose[1] = 1.0    # FR_thigh (standing=0.8)
         self._sit_pose[2] = -1.7   # FR_calf  (standing=-1.5)

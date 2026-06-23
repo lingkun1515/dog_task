@@ -54,8 +54,8 @@ class GraspConfig:
     lift_height: float = 0.15           # 提起高度（米）
     safe_park: list[float] = field(default_factory=lambda: [-90, 30, -10, 0, 0, 0])
     max_attempts: int = 3               # 最多重试次数（IK失败时坐下重新检测再抓取）
-    move_wait: float = 2.0              # 移动后等待时间（秒）
-    gripper_wait: float = 0.5           # 夹爪动作等待时间（秒）
+    move_wait: float = 1.0              # 移动后等待时间（秒，原 2.0 太慢 multi-grasp）
+    gripper_wait: float = 0.3           # 夹爪动作等待时间（秒）
 
 
 class GraspPlanner:
