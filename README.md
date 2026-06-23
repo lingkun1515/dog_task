@@ -201,13 +201,13 @@ DogTaskSim/
 
 调度后台支持 4 种任务场景，共用同一 8 步时间线，差异仅在 PICK_AND_PUT 阶段的作业行为：
 
-| 场景 | PICK_AND_PUT 行为 | 默认目标体 |
+| 场景 | PICK_AND_PUT 行为 | 目标体（专属） |
 |------|------------------|-----------|
-| `lawn_debris`   | 单目标抓取（球体）       | target_sphere |
-| `golf_ball`     | 多目标逐个回收（5 个球） | golf_ball_0..4 |
-| `rain_inspect`  | 巡检扫描（检测积水点，不抓取） | puddle_0..2 |
-| `material_drop` | 物料投放（携带方块→释放） | payload_box |
-| `mixed_debris`  | 多类型多目标回收（球+方块+瓶+袋） | target_sphere + debris_box/bottle/bag |
+| `lawn_debris`   | 单目标抓取（树枝异物）   | debris_branch（capsule 棕色） |
+| `golf_ball`     | 多目标逐个回收（5 个球） | golf_ball_0..4（sphere 白色） |
+| `rain_inspect`  | 巡检扫描（检测积水点，不抓取） | puddle_0..2（cylinder 蓝色） |
+| `material_drop` | 物料投放（携带方块→释放） | payload_box（box 红色） |
+| `mixed_debris`  | 多类型多目标回收（球+方块+瓶+袋） | debris_ball + debris_box×2 + bottle + bag |
 
 前端「任务类型」下拉框选择场景；调度端把 `scene` 参数透传给 `/run`，
 scheduler 在派发前调用 `/api/scene/setup` 激活场景几何（重定位 MuJoCo body
