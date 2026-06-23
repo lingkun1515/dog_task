@@ -416,6 +416,28 @@ python -m scripts.video_review --video logs/eval_episodes/<latest>/third_person.
 - mixed_debris 165.9s，5/5 全回收（球+方块×2+瓶+袋），路径 32.67m，到达误差 0.165m
 - lawn_debris 基线正常（90s success）
 
+### 关键发现：IK 到位改进（加深 sit_pose）
+
+**根因定位（量化）：**
+- 球在地面 z=0.04m，坐下后 arm_base z=0.279m → 球相对 arm z=-0.239m
+- IK 工作空间边界：z ≥ -0.20m 可达，z ≤ -0.25m 不可达
+- 球的 z=-0.239 刚好在边界外（差 0.039m）→ IK 下降失败 → TCP 离球 279mm → 物理接触不发生
+
+**修复（加深 sit_pose）：**
+- `scene.py`: 后腿 thigh 1.5→1.8, calf -2.2→-2.5（更深折叠）
+- arm_base 从 z=0.279 降到 z=0.247（降 3.2cm）
+- 球相对 arm z 从 -0.239 改善到 -0.207（进入 IK 可达范围）
+- base_z 从 ~0.22 降到 0.192（仍稳定，未摔倒）
+
+**multi-grasp 加速：**
+- `planner.py`: move_wait 2.0→1.0s, gripper_wait 0.5→0.3s
+- 单次抓取 ~30s → ~18s
+- mixed_debris 全流程 165.9s → 126.2s
+
+**验证（2026-06-23）：**
+- lawn_debris: TCP 到达球的位置（视觉确认球在夹爪手指间），result=success
+- mixed_debris: 126.2s（原 165.9s），5/5 全回收
+
 - **设计**：`scripts/record_task_video.py` 独立跑完整 FSM 任务 + 录制。
 - **合成视频**：第三视角（跟踪相机）为主画面，第一视角（front_cam 640×480 原生分辨率）作 PiP 嵌入左上角，叠加与 web `/api/video_feed` 一致的检测框。
 - **检测框对齐**：front cam 必须用原生 640×480 渲染（匹配 SimObjectDetector 内参 fx/fy/cx/cy），否则像素坐标错位。PiP 缩放时整体缩放，框仍正确。
