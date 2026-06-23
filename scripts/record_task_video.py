@@ -493,7 +493,7 @@ def _run_task_with_recording(
             scene_obj.start_grasp()
             time.sleep(0.5)
             # 等待作业完成
-            task_timeout = 240.0 if scene == SCENE_GOLF_BALL else 90.0
+            task_timeout = 300.0 if scene in (SCENE_GOLF_BALL, "mixed_debris") else 90.0
             task_start = time.time()
             while time.time() - task_start < task_timeout:
                 recorder.capture_frame(phase_label=f"task:{scene_obj.state['grasp_state']}")
