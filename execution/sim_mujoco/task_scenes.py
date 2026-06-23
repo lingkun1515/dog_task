@@ -60,12 +60,16 @@ class SceneBodySpec:
 
 
 def _lawn_debris_specs(target_pos: tuple[float, float, float]) -> list[SceneBodySpec]:
-    """lawn_debris: 单黄色球体放在 target。"""
+    """lawn_debris: 单个树枝/长条异物（capsule 细长，棕色）。
+
+    不再用 target_sphere（黄色球），改用 debris_branch 模拟草坪上的断枝，
+    形状/颜色与 golf_ball（白球）、mixed_debris（多色杂物）区分。
+    """
     return [
         SceneBodySpec(
-            body_name="target_sphere",
+            body_name="debris_branch",
             pos=target_pos,
-            label="debris",
+            label="branch",
         )
     ]
 
@@ -118,16 +122,17 @@ def _rain_inspect_specs(target_pos: tuple[float, float, float]) -> list[SceneBod
 
 
 def _mixed_debris_specs(target_pos: tuple[float, float, float]) -> list[SceneBodySpec]:
-    """mixed_debris: L3 混合类型目标——球 + 方块 + 圆柱 + 袋装。
+    """mixed_debris: L3 混合类型目标——专属球 + 方块 + 圆柱 + 袋装。
 
+    不再借用 target_sphere（lawn_debris 专属），改用 debris_ball。
     布局考量：不同形状需要不同的抓取策略（球=顶部抓，方块=侧面抓，
     圆柱=侧面抓，袋=任意）。这里统一用紧凑布局（D1 工作空间内），
     感知器按 body_name 分类，规划器对所有类型用同一套 IK（靠 weld 兜底）。
     """
     cx, cy, _cz = target_pos
     return [
-        # 球（黄色，单目标）
-        SceneBodySpec(body_name="target_sphere", pos=(cx, cy, 0.04), label="ball"),
+        # 球（专属 debris_ball，金黄色）
+        SceneBodySpec(body_name="debris_ball", pos=(cx, cy, 0.020), label="ball"),
         # 方块（棕色，小积木）
         SceneBodySpec(body_name="debris_box_0", pos=(cx + 0.10, cy + 0.06, 0.025), label="box"),
         # 方块（灰色，更小）
@@ -149,12 +154,12 @@ _SCENE_SPEC_BUILDERS = {
 
 # 各场景需要从 park 区移出的 body 全集（用于 clear 时统一回 park）
 _SCENE_BODY_REGISTRY = {
-    SCENE_LAWN_DEBRIS: ["target_sphere"],
+    SCENE_LAWN_DEBRIS: ["debris_branch"],
     SCENE_GOLF_BALL: [f"golf_ball_{i}" for i in range(5)],
     SCENE_RAIN_INSPECT: ["puddle_0", "puddle_1", "puddle_2"],
     SCENE_MATERIAL_DROP: ["payload_box"],
     SCENE_MIXED_DEBRIS: [
-        "target_sphere", "debris_box_0", "debris_box_1",
+        "debris_ball", "debris_box_0", "debris_box_1",
         "debris_bottle_0", "debris_bag_0",
     ],
 }
@@ -166,6 +171,7 @@ _PARKABLE_BODIES = (
     + ["debris_box_0", "debris_box_1", "debris_box_2"]
     + ["debris_bottle_0", "debris_bottle_1"]
     + ["debris_bag_0"]
+    + ["debris_branch", "debris_ball"]
 )
 
 
@@ -212,16 +218,16 @@ class TaskSceneManager:
         if self._current_scene == SCENE_GOLF_BALL:
             return [f"golf_ball_{i}" for i in range(5)]
         if self._current_scene == SCENE_LAWN_DEBRIS:
-            return ["target_sphere"]
+            return ["debris_branch"]
         if self._current_scene == SCENE_MATERIAL_DROP:
             return ["payload_box"]
         if self._current_scene == SCENE_RAIN_INSPECT:
             return ["puddle_0", "puddle_1", "puddle_2"]
         if self._current_scene == SCENE_MIXED_DEBRIS:
-            return ["target_sphere", "debris_box_0", "debris_box_1",
+            return ["debris_ball", "debris_box_0", "debris_box_1",
                     "debris_bottle_0", "debris_bag_0"]
         # 默认 lawn_debris 行为（向后兼容旧调用）
-        return ["target_sphere"]
+        return ["debris_branch"]
 
     @property
     def target_labels(self) -> list[str]:
@@ -235,7 +241,9 @@ class TaskSceneManager:
         if self._current_scene == SCENE_MIXED_DEBRIS:
             # 按形状分类标签（球/方块/圆柱/袋）
             return ["ball", "box", "box", "bottle", "bag"]
-        return ["ball"]  # lawn_debris & default
+        if self._current_scene == SCENE_LAWN_DEBRIS:
+            return ["branch"]
+        return ["debris"]  # default
 
     @property
     def requires_grasp(self) -> bool:
@@ -359,8 +367,12 @@ class TaskSceneManager:
         self._current_scene = None
 
     def reset_to_default(self) -> None:
-        """重置为默认 lawn_debris 场景（保持向后兼容）。"""
-        # target_sphere 已在 MJCF 初始位置，park 其它 body（关闭碰撞）
+        """重置为默认 lawn_debris 场景（保持向后兼容）。
+
+        lawn_debris 现在用 debris_branch（不再 target_sphere），
+        但 target_sphere 仍在 MJCF 中作为初始 body，这里一并 park。
+        """
+        # park 所有 body（关闭碰撞）
         for name in _PARKABLE_BODIES:
             self._relocate_body(name, _PARK_POS, _PARK_QUAT, enable_collision=False)
         self._current_scene = SCENE_LAWN_DEBRIS

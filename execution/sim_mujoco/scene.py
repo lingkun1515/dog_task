@@ -304,7 +304,7 @@ class SimulationScene:
         # 重置场景几何到默认 lawn_debris
         self.task_scene_mgr.reset_to_default()
         self._active_scene = SCENE_LAWN_DEBRIS
-        self._sim_detector.set_targets(["target_sphere"], ["ball"])
+        self._sim_detector.set_targets(["debris_branch"], ["branch"])
         self._last_task_result = None
         self._collected_targets.clear()
         self._refresh_snapshot()
@@ -766,7 +766,7 @@ class SimulationScene:
                 message=msg,
             )
         finally:
-            # 恢复 robot 的原始抓取目标（target_sphere）
+            # 恢复 robot 的原始抓取目标
             self.robot._grasp_target_body_id = original_ball_id
             self.robot._ball_qpos_addr = original_qpos_addr
             self.robot._ball_qvel_addr = original_qvel_addr
