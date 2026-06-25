@@ -170,6 +170,19 @@ class GraspPlanner:
 
             logger.info("arm 坐标: (%.4f, %.4f, %.4f)", target_arm[0], target_arm[1], target_arm[2])
 
+            # 工作空间可达性检查：目标距 arm_base 超过 0.6m 不可达（D1 臂展 ~0.55m）
+            # 这可以防止机器人摔倒后坐标变换产生无效目标导致 IK 空转数分钟
+            arm_reach = float(np.linalg.norm(target_arm))
+            if arm_reach > 0.6:
+                logger.warning("目标超出工作空间 (%.3fm > 0.6m)，跳过 (attempt %d/%d)",
+                              arm_reach, attempt + 1, cfg.max_attempts)
+                if attempt < cfg.max_attempts - 1:
+                    time.sleep(0.5)
+                    continue
+                self._set_error("out_of_workspace",
+                               "目标超出工作空间 (%.3fm)" % arm_reach)
+                return self._last_result
+
             # === 3. SAFE_PARK ===
             self._state = GraspState.PARKING
             self._status_msg = "parking"

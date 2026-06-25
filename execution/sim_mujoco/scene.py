@@ -199,17 +199,16 @@ class SimulationScene:
         # 四脚全趴：前后腿都深折叠，躯干降到最低（arm_base 最低，IK 可达范围最大）
         # 后腿（RR/RL）：thigh 1.8, calf -2.5（深折叠，承重）
         self._sit_pose[6] = 0.0    # RR_hip
-        self._sit_pose[7] = 1.8    # RR_thigh
-        self._sit_pose[8] = -2.5   # RR_calf
+        self._sit_pose[7] = 1.4    # RR_thigh (was 1.8, gentler fold for stability)
+        self._sit_pose[8] = -2.0   # RR_calf  (was -2.5)
         self._sit_pose[9] = 0.0    # RL_hip
-        self._sit_pose[10] = 1.8   # RL_thigh
-        self._sit_pose[11] = -2.5  # RL_calf
-        # 前腿（FR/FL）：也深折叠趴下（thigh 1.6, calf -2.3）
-        # 前脚趴下让躯干前倾降低，arm_base 更低 + 更靠前
-        self._sit_pose[1] = 1.6    # FR_thigh (standing=0.8)
-        self._sit_pose[2] = -2.3   # FR_calf  (standing=-1.5)
-        self._sit_pose[4] = 1.6    # FL_thigh
-        self._sit_pose[5] = -2.3   # FL_calf
+        self._sit_pose[10] = 1.4   # RL_thigh (was 1.8)
+        self._sit_pose[11] = -2.0  # RL_calf  (was -2.5)
+        # 前腿（FR/FL）：适度折叠（thigh 1.0, calf -1.7）
+        self._sit_pose[1] = 1.0    # FR_thigh (standing=0.8, was 1.6)
+        self._sit_pose[2] = -1.7   # FR_calf  (standing=-1.5, was -2.3)
+        self._sit_pose[4] = 1.0    # FL_thigh (was 1.6)
+        self._sit_pose[5] = -1.7   # FL_calf  (was -2.3)
         logger.info("坐下姿态已配置")
 
         # ---- keyboard teleop (only in GUI mode) ----
@@ -718,9 +717,8 @@ class SimulationScene:
     def _run_single_grasp(self) -> None:
         """lawn_debris：单目标抓取（原有 execute_full_cycle）。
 
-        改进：planner 结束后，无论 IK 是否完全到位，如果检测到目标体仍在
-        地面（未被提起），强制闭合夹爪 + 激活 weld 把物体拉到 TCP。
-        这样即使 IK 下降失败（边界外），物体仍能被「抓起」携带返航。
+        严格判定：planner SUCCESS = 抓取成功。weld 由 gripper close 自动
+        激活（transport binding）。不再强制 weld 兜底——如实报告结果。
         """
         import mujoco
         logger.info("开始单目标抓取 (lawn_debris)")
@@ -736,38 +734,20 @@ class SimulationScene:
         self._algo_planner.execute_full_cycle()
         ok = self._algo_planner.state == PlannerState.SUCCESS
 
-        # 检查目标体是否被提起（weld 激活且物体离开地面）
-        target_lifted = False
-        if target_name:
-            bid = mujoco.mj_name2id(self.robot.model, mujoco.mjtObj.mjOBJ_BODY, target_name)
-            if bid >= 0:
-                target_lifted = self.robot.data.xpos[bid][2] > 0.08  # 离地 >8cm
-        target_lifted = target_lifted or self.robot._grasp_weld_active
-
-        # 如果物体没被提起，强制 weld 兜底（把物体拉到 TCP）
-        if not target_lifted and target_name:
-            logger.info("[lawn_debris] 目标未提起，强制 weld 兜底")
-            bid = mujoco.mj_name2id(self.robot.model, mujoco.mjtObj.mjOBJ_BODY, target_name)
-            if bid >= 0:
-                self.robot._grasp_target_body_id = bid
-                self.robot._gripper_closed = True
-                # 立即激活 weld（不等 100 步延迟）
-                if self.robot._grasp_weld_id >= 0:
-                    self.robot.model.eq_obj1id[self.robot._grasp_weld_id] = bid
-                    self.robot._set_weld_relpose_to_current()
-                    self.robot.data.eq_active[self.robot._grasp_weld_id] = 1
-                    self.robot._grasp_weld_active = True
-                # 等几步让 weld 稳定（pin 已在 _set_weld_relpose_to_current 里取消）
-                time.sleep(1.0)
+        # 如实判定：planner SUCCESS 即抓取成功
+        # weld 由 check_grasp_contact_and_fallback 在物理接触后自动激活
+        if not ok and target_name:
+            logger.warning("[lawn_debris] 抓取失败: planner_state=%s weld=%s",
+                          self._algo_planner.state.value, self.robot._grasp_weld_active)
 
         self._last_task_result = TaskResult(
             scene=SCENE_LAWN_DEBRIS,
-            outcome=TaskOutcome.SUCCESS if (ok or self.robot._grasp_weld_active) else TaskOutcome.FAILED,
+            outcome=TaskOutcome.SUCCESS if ok else TaskOutcome.FAILED,
             details={
                 "planner_state": self._algo_planner.state.value,
-                "weld_fallback": self.robot._grasp_weld_active,
+                "weld_active": self.robot._grasp_weld_active,
             },
-            message="单目标抓取成功" if (ok or self.robot._grasp_weld_active) else "单目标抓取失败",
+            message="单目标抓取成功" if ok else "单目标抓取失败",
         )
 
     def _run_multi_grasp(self) -> None:
@@ -781,6 +761,10 @@ class SimulationScene:
         total = len(self.task_scene_mgr.target_body_names)
         logger.info("开始多目标回收 (golf_ball): 共 %d 个目标", total)
 
+        # 多目标场景：禁用 reposition（站起/坐下太不稳定），IK 失败直接跳过
+        original_reposition = self._algo_planner.reposition_fn
+        self._algo_planner.reposition_fn = None
+
         # 初始目标集：所有 golf 球
         active_bodies = list(self.task_scene_mgr.target_body_names)
         active_labels = list(self.task_scene_mgr.target_labels)
@@ -788,6 +772,11 @@ class SimulationScene:
 
         for idx in range(total):
             if not active_bodies:
+                break
+            # 跌倒检测：base 高度 <0.12m 说明机器人已倒，停止多目标回收
+            base_z = float(self.robot.base_position[2])
+            if base_z < 0.12:
+                logger.error("[golf] 检测到跌倒 (base_z=%.3fm)，终止多目标回收", base_z)
                 break
             current_body = active_bodies[0]
             # 更新 robot 的抓取目标体（weld 会动态重绑定到这个 body）
@@ -806,20 +795,10 @@ class SimulationScene:
             self._algo_planner.execute_full_cycle()
             grasp_ok = self._algo_planner.state == GS.SUCCESS
 
-            # 强制 weld 兜底（与 _run_single_grasp 相同逻辑）
+            # 如实判定：planner SUCCESS = 抓取成功。不强制 weld 兜底。
             if not grasp_ok:
-                import mujoco as _mj2
-                logger.info("[golf] 目标 %s planner 未成功，强制 weld 兜底", current_body)
-                bid2 = _mj2.mj_name2id(self.robot.model, _mj2.mjtObj.mjOBJ_BODY, current_body)
-                if bid2 >= 0 and self.robot._grasp_weld_id >= 0:
-                    self.robot._grasp_target_body_id = bid2
-                    self.robot._gripper_closed = True
-                    self.robot.model.eq_obj1id[self.robot._grasp_weld_id] = bid2
-                    self.robot._set_weld_relpose_to_current()
-                    self.robot.data.eq_active[self.robot._grasp_weld_id] = 1
-                    self.robot._grasp_weld_active = True
-                    time.sleep(1.0)
-                    grasp_ok = True  # weld 兜底成功
+                logger.warning("[golf] 目标 %s planner 未成功 (state=%s)，跳过",
+                              current_body, self._algo_planner.state.value)
 
             if grasp_ok:
                 collected = active_bodies.pop(0)
@@ -831,17 +810,19 @@ class SimulationScene:
                                                     enable_collision=False)
                 import mujoco
                 mujoco.mj_forward(self.robot.model, self.robot.data)
-                # 张开夹爪，准备下一次
+                # 张开夹爪 + 短暂站立稳定，准备下一次抓取
                 self.robot._gripper_closed = False
                 self.robot._grasp_weld_active = False
                 if self.robot._grasp_weld_id >= 0:
                     self.robot.data.eq_active[self.robot._grasp_weld_id] = 0
-                time.sleep(0.3)
+                time.sleep(0.5)
             else:
                 logger.warning("[golf] 目标 %d 抓取失败 (state=%s)，跳过",
                               idx + 1, self._algo_planner.state.value)
                 # 跳过该目标（从感知集移除，避免循环卡死）
                 active_bodies.pop(0)
+                # 失败后站立恢复，避免连续抓取导致不稳定
+                time.sleep(0.5)
 
         # 恢复默认感知目标集
         self._sim_detector.set_targets(
@@ -869,6 +850,8 @@ class SimulationScene:
             },
             message=msg,
         )
+        # 恢复 reposition（单目标场景仍需要）
+        self._algo_planner.reposition_fn = original_reposition
 
     def _run_material_drop(self) -> None:
         """material_drop：投放流程。

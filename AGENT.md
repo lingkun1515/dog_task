@@ -309,9 +309,19 @@ python -m scripts.video_review --video logs/eval_episodes/<latest>/third_person.
 
 ### 关键发现：导航路径长度
 
-- 当前路径 ~33m，机器人从 (0,0) 到 (12,0) 直线距离 12m，路径效率 ~36%。
-- 原因：边走边转策略在微小航向偏差时频繁转向，RL policy 每步损失行进距离。
-- 当前不影响成功率但影响效率，可作为后续优化方向。
+- 路径长度 ~33m 是**往返**距离：home(0,-10) → target(12,0) → home(0,-10)。
+- 往返直线 ~31.2m，实际 ~33m，**往返路径效率 ~95%**。
+- stop-and-turn 策略：heading_error > 0.25rad 时停车原地转，否则走直线。
+- 朝向误差从 ~19.7° 降至 2.4-17°，无绕圈现象。
+
+### 关键发现：多任务场景稳定性（2025-06-25）
+
+- **强制 weld 兜底 = 假成功**：原代码 IK 失败时强制激活 weld 伪装抓取成功。已移除。
+- **多目标 reposition 致跌倒**：IK 失败时站起→坐下循环导致不稳定。修复：多目标禁用 reposition。
+- **sit pose 深度折叠致跌倒**：后腿 thigh 1.8→1.4, calf -2.5→-2.0。前腿 thigh 1.6→1.0, calf -2.3→-1.7。
+- **工作空间可达性检查**：跌倒后 arm_base 重置，产生 ~15m 无效 IK 目标。新增 >0.6m 检查。
+- **多目标跌倒检测**：multi-grasp 循环检查 base_z < 0.12m，跌倒即终止。
+- **4/4 场景通过**：lawn_debris 90, golf_ball 100(5/5), rain_inspect 90, material_drop 100。
 
 ### 关键发现：多任务场景架构（task_scene）
 
@@ -461,6 +471,7 @@ python -m scripts.video_review --video logs/eval_episodes/<latest>/third_person.
 | return require_heading | **禁用** | — | RL policy 无法收敛 <0.1rad，返航不要求朝向 |
 | return arrival_threshold | 0.5m (默认) | 0.3-1.0 | 不要设 1.5m，会导致提前停止 |
 | heading_align_timeout | 8s | 5-12 | 到达后原地旋转对齐朝向的超时时间 |
+| stop_turn_threshold | 0.25 rad | 0.15-0.35 | heading error 超过此值停车原地转 |
 
 ### 球体参数
 
@@ -474,10 +485,10 @@ python -m scripts.video_review --video logs/eval_episodes/<latest>/third_person.
 
 | 参数 | 当前值 | 经验范围 | 说明 |
 |------|--------|---------|------|
-| sit_rear_thigh | 1.5 | 1.3-1.8 | 后腿大腿折叠角度（站立=1.0） |
-| sit_rear_calf | -2.2 | -2.5 - -2.0 | 后腿小腿角度（站立=-1.5） |
-| sit_front_thigh | 1.0 | 0.8-1.2 | 前腿大腿角度（站立=0.8） |
-| sit_front_calf | -1.7 | -1.9 - -1.5 | 前腿小腿角度（站立=-1.5） |
+| sit_rear_thigh | **1.4** | 1.2-1.6 | 后腿大腿（原1.8太激进致跌倒） |
+| sit_rear_calf | **-2.0** | -2.3 - -1.8 | 后腿小腿（原-2.5太激进） |
+| sit_front_thigh | 1.0 | 0.8-1.2 | 前腿大腿（原1.6，现1.0更稳定） |
+| sit_front_calf | -1.7 | -1.9 - -1.5 | 前腿小腿（原-2.3） |
 | sit_settle_time | 2.5s | 2.0-3.0 | PD 收敛等待，<2s 会抖动 |
 | pre_return_wait | 3.0s | 2.5-4.0 | 返航前等待手臂归位 + 站立恢复 |
 
