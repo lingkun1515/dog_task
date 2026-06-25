@@ -42,40 +42,25 @@ class SimRGBDCamera:
         self.width = width
         self.height = height
 
-        self._scene = mujoco.MjvScene(model, maxgeom=10000)
-        self._cam = mujoco.MjvCamera()
+        self._cam_name = cam_name
         cam_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, cam_name)
+        self._cam_id = cam_id
+        self._cam = mujoco.MjvCamera()
         if cam_id >= 0:
-            self._cam_id = cam_id
             self._cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
             self._cam.fixedcamid = cam_id
-        else:
-            self._cam_id = -1
-            self._cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
-            track_body = -1
-            for name in ("base_link", "base", "trunk"):
-                track_body = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, name)
-                if track_body >= 0:
-                    break
-            self._cam.trackbodyid = max(track_body, 0)
-            self._cam.distance = 3.0
-            self._cam.elevation = -25
-            self._cam.azimuth = 90
-        self._opt = mujoco.MjvOption()
 
-        self._context = context
-        self._own_context = False
+        # Use mujoco.Renderer (handles EGL context internally, works headless)
+        try:
+            self._renderer = mujoco.Renderer(model, height=height, width=width)
+            self._renderer.enable_depth_rendering()
+            self._ok = True
+        except Exception as e:
+            logger.warning("SimRGBDCamera Renderer 创建失败: %s", e)
+            self._renderer = None
+            self._ok = False
 
-        if self._context is None:
-            try:
-                self._context = mujoco.MjrContext(
-                    model, mujoco.mjtFontScale.mjFONTSCALE_150
-                )
-                self._own_context = True
-            except Exception:
-                self._context = None
-
-        self._ok = self._context is not None
+        self._context = None  # backward compat
 
         # Intrinsics matching D455 (fovy=65 at 640x480)
         self._update_intrinsics()
@@ -121,23 +106,16 @@ class SimRGBDCamera:
 
     def render(self) -> None:
         """Render RGB + depth for current frame. No-op if unavailable."""
-        if not self._ok or self._context is None:
+        if not self._ok or self._renderer is None:
             return
 
-        viewport = mujoco.MjrRect(0, 0, self.width, self.height)
-        mujoco.mjv_updateScene(
-            self.model, self.data, self._opt, None, self._cam,
-            mujoco.mjtCatBit.mjCAT_ALL, self._scene,
-        )
-        mujoco.mjr_render(viewport, self._scene, self._context)
-
-        rgb = np.zeros((self.height, self.width, 3), dtype=np.uint8)
-        depth_buf = np.zeros((self.height, self.width), dtype=np.float32)
-        mujoco.mjr_readPixels(rgb, depth_buf, viewport, self._context)
-        rgb = np.flipud(rgb)
-        depth_buf = np.flipud(depth_buf)
-
-        depth_m = self._depth_to_meters(depth_buf)
+        self._renderer.update_scene(self.data, camera=self._cam)
+        # RGB render
+        self._renderer.disable_depth_rendering()
+        rgb = self._renderer.render()
+        # Depth render (meters)
+        self._renderer.enable_depth_rendering()
+        depth_m = self._renderer.render()
 
         jpeg = self._encode_jpeg(rgb)
         if jpeg is None:
@@ -147,20 +125,6 @@ class SimRGBDCamera:
             self._latest_rgb = rgb
             self._latest_depth = depth_m
             self._latest_frame = jpeg
-
-    def _depth_to_meters(self, depth_buf: np.ndarray) -> np.ndarray:
-        """Convert MuJoCo depth buffer (NDC [0,1]) to linear depth in meters.
-
-        MuJoCo depth buffer: 0 = near plane, 1 = far plane.
-        Formula: z = znear * zfar / (zfar - depth * (zfar - znear))
-        """
-        extent = self.model.stat.extent
-        znear = float(self.model.vis.map.znear) * extent
-        zfar = float(self.model.vis.map.zfar) * extent
-        # depth_buf values in [0,1]
-        denom = zfar - depth_buf * (zfar - znear)
-        denom = np.maximum(denom, 0.001)
-        return (znear * zfar / denom).astype(np.float32)
 
     def get_rgb(self) -> np.ndarray | None:
         with self._lock:

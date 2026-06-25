@@ -16,6 +16,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+# Force Mesa EGL vendor before any mujoco import (Nvidia EGL fails when driver not loaded)
+import os as _os
+_os.environ.setdefault("MUJOCO_GL", "egl")
+_os.environ.setdefault("__EGL_VENDOR_LIBRARY_FILENAMES",
+                        "/usr/share/glvnd/egl_vendor.d/50_mesa.json")
+
 # 确保项目根目录在 sys.path 中
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -77,6 +83,9 @@ class EpisodeRunner:
         """初始化仿真场景和录制器。"""
         import os
         os.environ["MUJOCO_GL"] = "egl" if not args.gui else "glfw"
+        # Force Mesa EGL vendor (Nvidia EGL fails when driver not loaded)
+        os.environ.setdefault("__EGL_VENDOR_LIBRARY_FILENAMES",
+                              "/usr/share/glvnd/egl_vendor.d/50_mesa.json")
 
         from execution.sim_mujoco.scene import SimulationScene
 

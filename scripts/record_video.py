@@ -53,20 +53,14 @@ class VideoRecorder:
         self.height = height
         self.fps = fps
 
-        # MuJoCo rendering context — 优先复用调用方提供的（避免 headless EGL
-        # 下重复创建 GL context 失败 gladLoadGL error）
-        self._scene = mujoco.MjvScene(model, maxgeom=10000)
-        self._opt = mujoco.MjvOption()
-        self._own_context = False
-        if context is not None:
-            self._context = context
-        else:
-            try:
-                self._context = mujoco.MjrContext(model, mujoco.mjtFontScale.mjFONTSCALE_150)
-                self._own_context = True
-            except mujoco.FatalError as e:
-                logger.warning("VideoRecorder 无法创建 GL context: %s — 录制将跳过", e)
-                self._context = None
+        # Use mujoco.Renderer (handles EGL context internally, works headless)
+        try:
+            self._renderer = mujoco.Renderer(model, height=height, width=width)
+            self._ok = True
+        except Exception as e:
+            logger.warning("VideoRecorder 无法创建 Renderer: %s — 录制将跳过", e)
+            self._renderer = None
+            self._ok = False
 
         # Camera setup
         self._cam = mujoco.MjvCamera()
@@ -100,23 +94,13 @@ class VideoRecorder:
         """捕获当前仿真状态的一帧 RGB 图像。
 
         Returns:
-            np.ndarray: RGB 图像 (H, W, 3), uint8；context 不可用时返回 None
+            np.ndarray: RGB 图像 (H, W, 3), uint8；renderer 不可用时返回 None
         """
-        if self._context is None:
+        if self._renderer is None:
             return None
-        viewport = mujoco.MjrRect(0, 0, self.width, self.height)
-        mujoco.mjv_updateScene(
-            self.model, self.data, self._opt, None, self._cam,
-            mujoco.mjtCatBit.mjCAT_ALL, self._scene,
-        )
-        mujoco.mjr_render(viewport, self._scene, self._context)
-
-        rgb = np.zeros((self.height, self.width, 3), dtype=np.uint8)
-        depth = np.zeros((self.height, self.width), dtype=np.float32)
-        mujoco.mjr_readPixels(rgb, depth, viewport, self._context)
-        rgb = np.flipud(rgb)  # MuJoCo renders bottom-up
-
-        self._frames.append(rgb)
+        self._renderer.update_scene(self.data, camera=self._cam)
+        rgb = self._renderer.render()
+        self._frames.append(rgb.copy())
         self._frame_count += 1
         return rgb
 
