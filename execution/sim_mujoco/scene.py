@@ -199,16 +199,16 @@ class SimulationScene:
         # 四脚全趴：前后腿都深折叠，躯干降到最低（arm_base 最低，IK 可达范围最大）
         # 后腿（RR/RL）：thigh 1.8, calf -2.5（深折叠，承重）
         self._sit_pose[6] = 0.0    # RR_hip
-        self._sit_pose[7] = 1.4    # RR_thigh (was 1.8, gentler fold for stability)
-        self._sit_pose[8] = -2.0   # RR_calf  (was -2.5)
+        self._sit_pose[7] = 1.8    # RR_thigh (deep2: arm_z 0.378→0.271, IK可达球体)
+        self._sit_pose[8] = -2.5   # RR_calf
         self._sit_pose[9] = 0.0    # RL_hip
-        self._sit_pose[10] = 1.4   # RL_thigh (was 1.8)
-        self._sit_pose[11] = -2.0  # RL_calf  (was -2.5)
+        self._sit_pose[10] = 1.8   # RL_thigh
+        self._sit_pose[11] = -2.5  # RL_calf
         # 前腿（FR/FL）：适度折叠（thigh 1.0, calf -1.7）
-        self._sit_pose[1] = 1.0    # FR_thigh (standing=0.8, was 1.6)
-        self._sit_pose[2] = -1.7   # FR_calf  (standing=-1.5, was -2.3)
-        self._sit_pose[4] = 1.0    # FL_thigh (was 1.6)
-        self._sit_pose[5] = -1.7   # FL_calf  (was -2.3)
+        self._sit_pose[1] = 1.4    # FR_thigh
+        self._sit_pose[2] = -2.2   # FR_calf
+        self._sit_pose[4] = 1.4    # FL_thigh
+        self._sit_pose[5] = -2.2   # FL_calf
         logger.info("坐下姿态已配置")
 
         # ---- keyboard teleop (only in GUI mode) ----
@@ -773,9 +773,9 @@ class SimulationScene:
         for idx in range(total):
             if not active_bodies:
                 break
-            # 跌倒检测：base 高度 <0.12m 说明机器人已倒，停止多目标回收
+            # 跌倒检测：base 高度 <0.08m 说明机器人已倒（deep2 sit 自然 base_z≈0.14），停止多目标回收
             base_z = float(self.robot.base_position[2])
-            if base_z < 0.12:
+            if base_z < 0.08:
                 logger.error("[golf] 检测到跌倒 (base_z=%.3fm)，终止多目标回收", base_z)
                 break
             current_body = active_bodies[0]

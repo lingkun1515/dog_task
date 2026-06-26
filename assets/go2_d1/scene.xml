@@ -111,20 +111,20 @@
     <!-- lawn_debris 专属：树枝/长条异物（capsule，亮棕色，大尺寸确保视频中可见） -->
     <body name="debris_branch" pos="100 100 -5"><freejoint/><geom name="debris_branch_geom" type="capsule" fromto="-0.10 0 0 0.10 0 0" size="0.028" rgba="0.55 0.30 0.10 1" mass="0.020" contype="0" conaffinity="0"/></body>
 
-    <!-- mixed_debris 专属球（不再借用 target_sphere，金黄色，大尺寸） -->
-    <body name="debris_ball" pos="100 100 -5"><freejoint/><geom name="debris_ball_geom" type="sphere" size="0.028" rgba="0.95 0.75 0.05 1" mass="0.006" contype="0" conaffinity="0"/></body>
+    <!-- mixed_debris 专属球（缩小适应夹爪） -->
+    <body name="debris_ball" pos="100 100 -5"><freejoint/><geom name="debris_ball_geom" type="sphere" size="0.020" rgba="0.95 0.75 0.05 1" mass="0.004" contype="0" conaffinity="0"/></body>
 
     <!-- L3 多目标类型：方块/盒子（杂物场景用，加大确保可见） -->
-    <body name="debris_box_0" pos="100 100 -5"><freejoint/><geom name="debris_box_geom_0" type="box" size="0.030 0.030 0.030" rgba="0.65 0.35 0.12 1" mass="0.010" contype="0" conaffinity="0"/></body>
-    <body name="debris_box_1" pos="100 100 -5"><freejoint/><geom name="debris_box_geom_1" type="box" size="0.025 0.025 0.025" rgba="0.35 0.35 0.38 1" mass="0.007" contype="0" conaffinity="0"/></body>
-    <body name="debris_box_2" pos="100 100 -5"><freejoint/><geom name="debris_box_geom_2" type="box" size="0.035 0.025 0.020" rgba="0.15 0.55 0.22 1" mass="0.009" contype="0" conaffinity="0"/></body>
+    <body name="debris_box_0" pos="100 100 -5"><freejoint/><geom name="debris_box_geom_0" type="box" size="0.020 0.020 0.020" rgba="0.65 0.35 0.12 1" mass="0.006" contype="0" conaffinity="0"/></body>
+    <body name="debris_box_1" pos="100 100 -5"><freejoint/><geom name="debris_box_geom_1" type="box" size="0.018 0.018 0.018" rgba="0.35 0.35 0.38 1" mass="0.004" contype="0" conaffinity="0"/></body>
+    <body name="debris_box_2" pos="100 100 -5"><freejoint/><geom name="debris_box_geom_2" type="box" size="0.022 0.018 0.015" rgba="0.15 0.55 0.22 1" mass="0.005" contype="0" conaffinity="0"/></body>
 
     <!-- L3 多目标类型：圆柱/瓶（杂物场景用，加大） -->
-    <body name="debris_bottle_0" pos="100 100 -5"><freejoint/><geom name="debris_bottle_geom_0" type="cylinder" size="0.020 0.060" rgba="0.25 0.65 0.92 1" mass="0.012" contype="0" conaffinity="0"/></body>
-    <body name="debris_bottle_1" pos="100 100 -5"><freejoint/><geom name="debris_bottle_geom_1" type="cylinder" size="0.016 0.050" rgba="0.92 0.25 0.35 1" mass="0.010" contype="0" conaffinity="0"/></body>
+    <body name="debris_bottle_0" pos="100 100 -5"><freejoint/><geom name="debris_bottle_geom_0" type="cylinder" size="0.015 0.035" rgba="0.25 0.65 0.92 1" mass="0.006" contype="0" conaffinity="0"/></body>
+    <body name="debris_bottle_1" pos="100 100 -5"><freejoint/><geom name="debris_bottle_geom_1" type="cylinder" size="0.013 0.030" rgba="0.92 0.25 0.35 1" mass="0.005" contype="0" conaffinity="0"/></body>
 
     <!-- L3 多目标类型：袋装/软体（用 capsule 近似，加大） -->
-    <body name="debris_bag_0" pos="100 100 -5"><freejoint/><geom name="debris_bag_geom_0" type="capsule" fromto="0 0 0 0 0 0.05" size="0.028" rgba="0.55 0.42 0.30 1" mass="0.008" contype="0" conaffinity="0"/></body>
+    <body name="debris_bag_0" pos="100 100 -5"><freejoint/><geom name="debris_bag_geom_0" type="capsule" fromto="0 0 0 0 0 0.030" size="0.018" rgba="0.55 0.42 0.30 1" mass="0.004" contype="0" conaffinity="0"/></body>
 
     <!-- rain_inspect 场景：3 个深蓝「积水」标记（静态贴地，仅巡检演示用） -->
     <body name="puddle_0" pos="12.0 0.0 0.012"><geom name="puddle_geom_0" type="cylinder" size="0.10 0.005" rgba="0.10 0.20 0.55 0.70"/></body>

@@ -128,16 +128,16 @@ def _mixed_debris_specs(target_pos: tuple[float, float, float]) -> list[SceneBod
     """
     cx, cy, _cz = target_pos
     return [
-        # 球（专属 debris_ball，金黄色，r=0.028）
-        SceneBodySpec(body_name="debris_ball", pos=(cx, cy, 0.028), label="ball"),
-        # 方块（棕色，30mm 半边长）
-        SceneBodySpec(body_name="debris_box_0", pos=(cx + 0.10, cy + 0.06, 0.030), label="box"),
-        # 方块（灰色，25mm）
-        SceneBodySpec(body_name="debris_box_1", pos=(cx - 0.08, cy + 0.08, 0.025), label="box"),
-        # 圆柱/瓶（蓝色，h=60mm）
-        SceneBodySpec(body_name="debris_bottle_0", pos=(cx + 0.12, cy - 0.07, 0.060), label="bottle"),
-        # 袋装（棕色 capsule）
-        SceneBodySpec(body_name="debris_bag_0", pos=(cx - 0.10, cy - 0.06, 0.028), label="bag"),
+        # 球（专属 debris_ball，金黄色，r=0.020）—— 正中央
+        SceneBodySpec(body_name="debris_ball", pos=(cx, cy, 0.020), label="ball"),
+        # 方块（棕色，20mm）—— 前方偏右
+        SceneBodySpec(body_name="debris_box_0", pos=(cx + 0.05, cy - 0.04, 0.020), label="box"),
+        # 方块（灰色，18mm）—— 前方偏左
+        SceneBodySpec(body_name="debris_box_1", pos=(cx + 0.05, cy + 0.04, 0.018), label="box"),
+        # 圆柱/瓶（蓝色，缩短 h=35mm）—— 前方远端居中
+        SceneBodySpec(body_name="debris_bottle_0", pos=(cx + 0.10, cy, 0.035), label="bottle"),
+        # 袋装（棕色 capsule，缩小）—— 前方近端偏右
+        SceneBodySpec(body_name="debris_bag_0", pos=(cx - 0.05, cy - 0.04, 0.018), label="bag"),
     ]
 
 
