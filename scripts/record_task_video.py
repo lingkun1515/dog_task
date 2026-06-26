@@ -348,6 +348,16 @@ def _run_task_with_recording(
         annotate_fn=_annotate_fn,
     )
 
+    def _safe_capture(phase_label: str | None = None):
+        """Capture frame with physics paused (avoid mj_step/data race → segfault)."""
+        was_paused = scene_obj._physics_paused
+        scene_obj._physics_paused = True
+        time.sleep(0.005)
+        try:
+            recorder.capture_frame(phase_label=phase_label)
+        finally:
+            scene_obj._physics_paused = was_paused
+
     result: dict[str, Any] = {
         "scene": scene, "config": config_path,
         "target": [target_x, target_y], "home": [home_x, home_y],
@@ -364,7 +374,7 @@ def _run_task_with_recording(
         time.sleep(0.5)
         # 激活场景几何
         scene_obj.configure_scene(scene, target_x, target_y, home_x, home_y)
-        recorder.capture_frame(phase_label=f"scene={scene}")
+        _safe_capture(phase_label=f"scene={scene}")
 
         # 场景化导航停靠点（巡检后撤）
         nav_dwell = 0.6 if scene == SCENE_RAIN_INSPECT else 0.0
@@ -384,14 +394,14 @@ def _run_task_with_recording(
         arrived = False
         while time.time() - nav_start < max_duration:
             st = scene_obj.state
-            recorder.capture_frame(phase_label="navigate_to_target")
+            _safe_capture(phase_label="navigate_to_target")
             if st["nav_state"].value == "arrived":
                 arrived = True
                 break
             if st["nav_state"].value == "error":
                 break
             time.sleep(1.0 / fps)
-        recorder.capture_frame(phase_label="arrived_B" if arrived else "nav_failed")
+        _safe_capture(phase_label="arrived_B" if arrived else "nav_failed")
         result["arrived"] = arrived
         if not arrived:
             logger.warning("[%s] 去程导航未到达", scene)
@@ -407,7 +417,7 @@ def _run_task_with_recording(
             scene_obj.start_heading_align(goal_heading)
             align_start = time.time()
             while time.time() - align_start < 8.0:
-                recorder.capture_frame(phase_label="heading_align")
+                _safe_capture(phase_label="heading_align")
                 if scene_obj.state["nav_state"].value == "arrived":
                     break
                 time.sleep(1.0 / fps)
@@ -419,7 +429,7 @@ def _run_task_with_recording(
             task_timeout = 300.0 if scene in (SCENE_GOLF_BALL, "mixed_debris") else 90.0
             task_start = time.time()
             while time.time() - task_start < task_timeout:
-                recorder.capture_frame(phase_label=f"task:{scene_obj.state['grasp_state']}")
+                _safe_capture(phase_label=f"task:{scene_obj.state['grasp_state']}")
                 if not scene_obj._algo_running:
                     time.sleep(0.3)
                     break
@@ -435,7 +445,7 @@ def _run_task_with_recording(
                 label = "task_done:success"
             else:
                 label = f"task_failed:{st['grasp_state']}"
-            recorder.capture_frame(phase_label=label)
+            _safe_capture(phase_label=label)
             result["task_outcome"] = (tr or {}).get("outcome")
             result["task_message"] = (tr or {}).get("message")
 
@@ -449,17 +459,17 @@ def _run_task_with_recording(
             ret_start = time.time()
             returned = False
             while time.time() - ret_start < max_duration:
-                recorder.capture_frame(phase_label="return_to_dock")
+                _safe_capture(phase_label="return_to_dock")
                 if scene_obj.state["nav_state"].value == "arrived":
                     returned = True
                     break
                 time.sleep(1.0 / fps)
-            recorder.capture_frame(phase_label="docked" if returned else "dock_failed")
+            _safe_capture(phase_label="docked" if returned else "dock_failed")
             result["returned"] = returned
             result["success"] = returned
 
         # 收尾帧
-        recorder.capture_frame(phase_label="FINISHED" if result["success"] else "END")
+        _safe_capture(phase_label="FINISHED" if result["success"] else "END")
         result["duration_s"] = time.time() - start
 
         # 保存视频

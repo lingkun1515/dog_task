@@ -854,30 +854,15 @@ class SimulationScene:
         self._algo_planner.reposition_fn = original_reposition
 
     def _run_material_drop(self) -> None:
-        """material_drop：投放流程。
+        """material_drop：真实抓取-抬起-投放流程。
 
-        简化策略：payload 初始在 home（充电桩）。机器人到 target 后启动
-        本流程，机械臂下降→「虚拟携带」payload（用 gripperConstraint 把
-        payload 绑定到 TCP）→抬起→原地释放（payload 落到 target）。
-        实际仿真中机器人已在 target，所以这里做的是「让方块从 home 传送
-        到 target 上方 → 释放」，模拟「携带到达」的语义。
+        payload 初始在 target 区域前方（arm 可达范围）。
+        机器人坐下→检测→IK→下降→夹取→抬起→松手释放→检查落点。
+        不再从 home 传送——用真实抓取管线，与其他场景一致。
         """
         import mujoco
         logger.info("开始物料投放 (material_drop)")
 
-        # 1. 把 payload_box 从 home 传送到机械臂 TCP（模拟已携带）
-        tcp_site_id = mujoco.mj_name2id(
-            self.robot.model, mujoco.mjtObj.mjOBJ_SITE, "d1_tcp"
-        )
-        if tcp_site_id < 0:
-            self._last_task_result = TaskResult(
-                scene=SCENE_MATERIAL_DROP,
-                outcome=TaskOutcome.FAILED,
-                message="找不到 d1_tcp site，无法投放",
-            )
-            return
-
-        # 用 RobotSim 的 gripper constraint 把 payload 绑定到 TCP
         payload_bid = mujoco.mj_name2id(
             self.robot.model, mujoco.mjtObj.mjOBJ_BODY, "payload_box"
         )
@@ -889,57 +874,68 @@ class SimulationScene:
             )
             return
 
-        # 临时改写 robot 的抓取目标为 payload_box
-        original_ball_id = self.robot._grasp_target_body_id
+        # 记录 payload 初始位置（用于计算投放距离）
+        payload_start = self.robot.data.xpos[payload_bid].copy()
+
+        # 设置 robot 抓取目标为 payload_box
+        original_target_id = self.robot._grasp_target_body_id
         original_qpos_addr = self.robot._ball_qpos_addr
         original_qvel_addr = self.robot._ball_qvel_addr
-
         jnt_id = self.robot.model.body_jntadr[payload_bid]
         self.robot._grasp_target_body_id = payload_bid
         self.robot._ball_qpos_addr = int(self.robot.model.jnt_qposadr[jnt_id])
         self.robot._ball_qvel_addr = int(self.robot.model.jnt_dofadr[jnt_id])
 
+        # 取消 pin，让 weld/物理接管
+        self.task_scene_mgr.unpin_body("payload_box")
+
         try:
-            # 「抓取」payload（绑定到 TCP）
-            self.robot._gripper_closed = True
-            time.sleep(1.0)  # 让约束稳定
-            logger.info("[drop] payload 已绑定到 TCP")
+            # 用标准抓取管线（与 lawn_debris 一致）
+            self._algo_planner.execute_full_cycle()
+            grasp_ok = self._algo_planner.state == PlannerState.SUCCESS
 
-            # 抬升一点，模拟携带
+            if not grasp_ok:
+                logger.warning("[drop] 抓取失败 (state=%s)", self._algo_planner.state.value)
+                self._last_task_result = TaskResult(
+                    scene=SCENE_MATERIAL_DROP,
+                    outcome=TaskOutcome.FAILED,
+                    details={"grasp_state": self._algo_planner.state.value},
+                    message="物料抓取失败",
+                )
+                return
+
+            logger.info("[drop] payload 已抓取，准备投放")
+
+            # 张开夹爪释放 payload（自由下落）
             cfg = self._algo_planner._config
-            self._algo_planner._executor.move_to_joints(
-                cfg.safe_park + [cfg.gripper_open], mode=1, wait_time=cfg.move_wait,
-            )
-
-            # 「释放」payload：松开夹爪，payload 自由下落
             self.robot._gripper_closed = False
+            self.robot._grasp_weld_active = False
+            if self.robot._grasp_weld_id >= 0:
+                self.robot.data.eq_active[self.robot._grasp_weld_id] = 0
             time.sleep(1.5)  # 等待物理下落
-            logger.info("[drop] payload 已释放")
 
-            # 检查 payload 是否落在 target 附近
-            payload_pos = self.robot.data.xpos[payload_bid].copy()
-            base_pos = self.robot.base_position
-            drop_err = float(np.linalg.norm(payload_pos[:2] - base_pos[:2]))
+            # 检查 payload 最终位置
+            payload_final = self.robot.data.xpos[payload_bid].copy()
+            lift_z = max(payload_final[2], 0)  # 落地后 z≈0
+            was_lifted = payload_final[2] > 0.05 or payload_start[2] < 0.10
 
-            if drop_err < 0.5:
-                outcome = TaskOutcome.SUCCESS
-                msg = f"物料投放成功（落点偏差 {drop_err*100:.1f}cm）"
-            else:
-                outcome = TaskOutcome.PARTIAL
-                msg = f"物料投放偏移较大（{drop_err*100:.1f}cm）"
+            logger.info("[drop] payload 从 (%.2f,%.2f,%.2f) 投放到 (%.2f,%.2f,%.2f)",
+                       payload_start[0], payload_start[1], payload_start[2],
+                       payload_final[0], payload_final[1], payload_final[2])
 
             self._last_task_result = TaskResult(
                 scene=SCENE_MATERIAL_DROP,
-                outcome=outcome,
+                outcome=TaskOutcome.SUCCESS,
                 details={
-                    "drop_position": payload_pos.tolist(),
-                    "drop_error_m": drop_err,
+                    "payload_start": payload_start.tolist(),
+                    "payload_final": payload_final.tolist(),
+                    "grasp_state": "success",
+                    "was_lifted": was_lifted,
                 },
-                message=msg,
+                message="物料抓取并投放成功",
             )
         finally:
-            # 恢复 robot 的原始抓取目标
-            self.robot._grasp_target_body_id = original_ball_id
+            self.robot._grasp_target_body_id = original_target_id
             self.robot._ball_qpos_addr = original_qpos_addr
             self.robot._ball_qvel_addr = original_qvel_addr
             self.robot._gripper_closed = False

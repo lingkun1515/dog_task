@@ -196,8 +196,7 @@ class EpisodeRunner:
             self._capture_state("navigating")
 
             # 录制帧
-            if self.recorder:
-                self.recorder.capture_frame()
+            self._safe_capture()
 
             # 检查是否到达
             if nav_state.value == "arrived":
@@ -226,7 +225,7 @@ class EpisodeRunner:
                 align_state = self.scene.state
                 self._capture_state("heading_align")
                 if self.recorder:
-                    self.recorder.capture_frame()
+                    self._safe_capture()
                 if align_state["nav_state"].value == "arrived":
                     h_err = abs(align_state["base_yaw"] - goal_heading)
                     h_err = min(h_err, 2 * _math.pi - h_err)
@@ -258,7 +257,7 @@ class EpisodeRunner:
 
                 # 录制帧
                 if self.recorder:
-                    self.recorder.capture_frame()
+                    self._safe_capture()
 
                 # 检查作业是否结束（algo 线程退出）
                 if not self.scene._algo_running:
@@ -335,7 +334,7 @@ class EpisodeRunner:
 
                 # 录制帧
                 if self.recorder:
-                    self.recorder.capture_frame()
+                    self._safe_capture()
 
                 # 检查是否到达
                 if nav_state.value == "arrived":
@@ -368,6 +367,17 @@ class EpisodeRunner:
         logger.info("Episode 结束: success=%s, task_succeeded=%s, duration=%.1fs",
                     self.episode_meta["success"], task_succeeded,
                     self.episode_meta["duration_s"])
+
+    def _safe_capture(self):
+        """Capture video frame with physics paused to avoid mj_step/data race."""
+        if self.recorder:
+            was_paused = self.scene._physics_paused
+            self.scene._physics_paused = True
+            time.sleep(0.005)  # let loop thread reach the pause check
+            try:
+                self.recorder.capture_frame()
+            finally:
+                self.scene._physics_paused = was_paused
 
     def _capture_state(self, phase: str):
         """采集当前状态。"""

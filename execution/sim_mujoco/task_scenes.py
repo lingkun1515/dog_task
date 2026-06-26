@@ -306,11 +306,11 @@ class TaskSceneManager:
 
         specs = builder(target_pos)
 
-        # material_drop 特殊：payload 初始放在 home，不是 target
+        # material_drop: payload 放在 target 区域前方（arm 可达）
         if scene == SCENE_MATERIAL_DROP and specs:
             specs[0] = SceneBodySpec(
                 body_name=specs[0].body_name,
-                pos=(home_pos[0], home_pos[1], 0.05),
+                pos=(target_pos[0] + 0.05, target_pos[1], 0.03),  # arm 前方 5cm
                 label=specs[0].label,
             )
 
