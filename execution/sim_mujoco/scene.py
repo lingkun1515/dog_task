@@ -906,18 +906,25 @@ class SimulationScene:
 
             logger.info("[drop] payload 已抓取，准备投放")
 
-            # 张开夹爪释放 payload（自由下落）
+            # 张开夹爪释放 payload，然后在原地 pin 住（防止 freejoint 穿地）
             cfg = self._algo_planner._config
             self.robot._gripper_closed = False
             self.robot._grasp_weld_active = False
             if self.robot._grasp_weld_id >= 0:
                 self.robot.data.eq_active[self.robot._grasp_weld_id] = 0
-            time.sleep(1.5)  # 等待物理下落
+            time.sleep(0.5)  # 短暂等待 weld 释放
+
+            # 在当前位置 pin 住 payload（模拟「放到地上」）
+            drop_pos = self.robot.data.xpos[payload_bid].copy()
+            import mujoco
+            drop_pos[2] = max(drop_pos[2], 0.03)  # 不低于地面
+            self.task_scene_mgr.pin_body("payload_box", tuple(drop_pos[:3]),
+                                         (1, 0, 0, 0))
+            time.sleep(0.5)
 
             # 检查 payload 最终位置
             payload_final = self.robot.data.xpos[payload_bid].copy()
-            lift_z = max(payload_final[2], 0)  # 落地后 z≈0
-            was_lifted = payload_final[2] > 0.05 or payload_start[2] < 0.10
+            was_lifted = bool(payload_final[2] > 0.05 or payload_start[2] < 0.10)
 
             logger.info("[drop] payload 从 (%.2f,%.2f,%.2f) 投放到 (%.2f,%.2f,%.2f)",
                        payload_start[0], payload_start[1], payload_start[2],
