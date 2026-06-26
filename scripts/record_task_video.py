@@ -3,8 +3,8 @@
 设计动机：
 - AGENT.md 机制 3「视频第一性原则」要求每轮评估产出视频供人工/AI 审查。
 - 之前 --record-video 在 headless EGL 环境失败（gladLoadGL error）。
-- 本模块用 GLFW 隐藏窗口 + 自有 GL context，独立于主 sim server，可在
-  无显示器的服务器上稳定运行（只要 GPU 驱动 + X server 可用）。
+- 本模块用 mujoco.Renderer（EGL 软件渲染），可在无显示器、无 GPU 的
+  服务器上稳定运行（Mesa EGL）。
 
 输出：
     logs/task_videos/<scene>_<YYYYMMDDTHHMMSS>.mp4   # 第三视角主视频
@@ -35,9 +35,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-# 必须在 import mujoco 前设 MUJOCO_GL=glfw（egl 在本机失败）
-# 若用户已显式设置则尊重其选择
-os.environ.setdefault("MUJOCO_GL", "glfw")
+# MUJOCO_GL=egl + Mesa 软件渲染（无 GPU / 无 X server 可用）
+os.environ.setdefault("MUJOCO_GL", "egl")
+os.environ.setdefault(
+    "__EGL_VENDOR_LIBRARY_FILENAMES",
+    "/usr/share/glvnd/egl_vendor.d/50_mesa.json",
+)
 
 from utils.logging import setup_logging
 
@@ -56,10 +59,10 @@ DEFAULT_HEIGHT = 540
 
 
 class TaskVideoRecorder:
-    """独立的任务视频录制器：自建 GLFW 隐藏窗口 + GL context，捕获 sim 帧。
+    """独立的任务视频录制器：用 mujoco.Renderer（EGL 软件渲染），捕获 sim 帧。
 
     与 scripts/record_video.py 的区别：
-    - 本类完全自建 GL 上下文（GLFW 隐藏窗口），不依赖外部 viewer/camera。
+    - 本类用 mujoco.Renderer 自建 EGL 上下文，不依赖外部 viewer/camera。
     - 适合在 headless 服务器（无桌面）上独立跑评估 + 录视频。
     - 同时录制第三视角（跟踪相机）+ 第一视角（前置相机）。
     """
@@ -73,8 +76,6 @@ class TaskVideoRecorder:
         fps: int = DEFAULT_FPS,
         front_cam_name: str = "front_cam",
         track_body_name: str = "base_link",
-        own_window: bool = False,
-        existing_context: "mujoco.MjrContext | None" = None,
         annotate_fn: "callable | None" = None,
     ):
         self.model = model
@@ -82,39 +83,14 @@ class TaskVideoRecorder:
         self.width = width
         self.height = height
         self.fps = fps
-        self._glfw_window = None
-        self._glfw = None
-        self._owns_context = False
         # 检测标注回调：annotate_fn(rgb) -> annotated_rgb。
         # 由调用方传入，封装 SimObjectDetector.annotate_frame + detect_enabled 逻辑，
         # 使 PiP 显示与 web /api/video_feed 完全一致（含检测框 + 深度 + 置信度）。
         self._annotate_fn = annotate_fn
 
-        # GL context 三选一：
-        # 1) existing_context: 直接复用（推荐，避免多 MjrContext segfault）
-        # 2) own_window=True: 自建 GLFW 隐藏窗口 + MjrContext
-        # 3) 默认: 假设调用方已 make_context_current，自建 MjrContext
-        if existing_context is not None:
-            self._context = existing_context
-            logger.info("[TaskVideoRecorder] 复用现有 MjrContext")
-        elif own_window:
-            self._init_gl_context()
-            self._scene = mujoco.MjvScene(model, maxgeom=10000)
-            self._opt = mujoco.MjvOption()
-            self._context = mujoco.MjrContext(model, mujoco.mjtFontScale.mjFONTSCALE_150)
-            self._owns_context = True
-        else:
-            import glfw as _glfw
-            self._glfw = _glfw
-            self._scene = mujoco.MjvScene(model, maxgeom=10000)
-            self._opt = mujoco.MjvOption()
-            self._context = mujoco.MjrContext(model, mujoco.mjtFontScale.mjFONTSCALE_150)
-            self._owns_context = True
-
-        # MuJoCo 渲染对象（如果 existing_context 路径已建则跳过）
-        if not hasattr(self, "_scene"):
-            self._scene = mujoco.MjvScene(model, maxgeom=10000)
-            self._opt = mujoco.MjvOption()
+        # 使用 mujoco.Renderer（内部管理 EGL context，headless 可用）
+        self._third_renderer = mujoco.Renderer(model, height=height, width=width)
+        self._third_opt = mujoco.MjvOption()
 
         # 第三视角（跟踪机器人，拉近让目标物体更可见）
         self._third_cam = mujoco.MjvCamera()
@@ -140,8 +116,11 @@ class TaskVideoRecorder:
             self._front_cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
             self._front_cam.trackbodyid = self._third_cam.trackbodyid
             self._front_cam.distance = 1.0
-        # 第一视角的独立 MjvScene（不同分辨率）
-        self._front_scene = mujoco.MjvScene(model, maxgeom=10000)
+        # 第一视角独立 Renderer（原生 640×480，对齐检测器内参）
+        self._front_renderer = mujoco.Renderer(
+            model, height=self._front_native_h, width=self._front_native_w,
+        )
+        self._front_opt = mujoco.MjvOption()
 
         # 帧缓冲：第三视角 + 第一视角成对存储（用于 PiP 合成）
         self._third_frames: list[np.ndarray] = []
@@ -155,61 +134,27 @@ class TaskVideoRecorder:
         self._pip_y = 44                           # 留出顶部阶段标签的空间
 
         logger.info(
-            "[TaskVideoRecorder] GL context ready, %dx%d @ %dfps",
+            "[TaskVideoRecorder] Renderer ready, %dx%d @ %dfps",
             width, height, fps,
         )
-
-    def _init_gl_context(self) -> None:
-        """创建 GLFW 隐藏窗口并设为当前 GL context。"""
-        import glfw
-
-        if not glfw.init():
-            raise RuntimeError("GLFW 初始化失败（无 X server？检查 DISPLAY 环境变量）")
-        glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
-        window = glfw.create_window(self.width, self.height, "offscreen", None, None)
-        if not window:
-            raise RuntimeError("GLFW 隐藏窗口创建失败")
-        glfw.make_context_current(window)
-        self._glfw_window = window
-        self._glfw = glfw
-        logger.info("[TaskVideoRecorder] GLFW 隐藏窗口已创建（offscreen render）")
 
     def _render_view(
         self,
         cam: mujoco.MjvCamera,
         *,
-        scene: mujoco.MjvScene | None = None,
-        width: int | None = None,
-        height: int | None = None,
+        renderer: mujoco.Renderer,
+        opt: mujoco.MjvOption,
     ) -> np.ndarray | None:
-        """渲染指定相机视图，返回 RGB (H, W, 3) uint8。
-
-        默认用主 scene + 录制分辨率；front cam 传 scene=self._front_scene +
-        原生分辨率（640×480）以对齐检测器内参。
-        """
-        scn = scene if scene is not None else self._scene
-        w = width if width is not None else self.width
-        h = height if height is not None else self.height
-        viewport = mujoco.MjrRect(0, 0, w, h)
-        mujoco.mjv_updateScene(
-            self.model, self.data, self._opt, None, cam,
-            mujoco.mjtCatBit.mjCAT_ALL, scn,
-        )
-        err = mujoco.mjr_render(viewport, scn, self._context)
-        if err:
-            return None
-        rgb = np.zeros((h, w, 3), dtype=np.uint8)
-        depth = np.zeros((h, w), dtype=np.float32)
-        mujoco.mjr_readPixels(rgb, depth, viewport, self._context)
-        return np.flipud(rgb)
+        """用 mujoco.Renderer 渲染指定相机视图，返回 RGB (H, W, 3) uint8。"""
+        renderer.update_scene(self.data, camera=cam, scene_option=opt)
+        return renderer.render()
 
     def _render_front_annotated(self) -> np.ndarray | None:
         """渲染第一视角（原生 640×480）并叠加检测框（与 web 端一致）。"""
         front = self._render_view(
             self._front_cam,
-            scene=self._front_scene,
-            width=self._front_native_w,
-            height=self._front_native_h,
+            renderer=self._front_renderer,
+            opt=self._front_opt,
         )
         if front is None:
             return None
@@ -226,7 +171,7 @@ class TaskVideoRecorder:
 
         两视角成对存储，保存时合成 PiP 单视频。
         """
-        third = self._render_view(self._third_cam)
+        third = self._render_view(self._third_cam, renderer=self._third_renderer, opt=self._third_opt)
         front = self._render_front_annotated()
         if third is not None:
             self._third_frames.append(third)
@@ -343,19 +288,14 @@ class TaskVideoRecorder:
                 tmp.unlink()
 
     def close(self) -> None:
-        """释放 GL 资源（仅释放自己拥有的，shared context 由 owner 释放）。"""
-        if self._owns_context:
-            try:
-                if self._context is not None:
-                    self._context.free()
-            except Exception:
-                pass
-        try:
-            if self._glfw_window is not None and self._glfw is not None:
-                self._glfw.destroy_window(self._glfw_window)
-                self._glfw.terminate()
-        except Exception:
-            pass
+        """释放 Renderer 资源。"""
+        for attr in ("_third_renderer", "_front_renderer"):
+            r = getattr(self, attr, None)
+            if r is not None:
+                try:
+                    r.close()
+                except Exception:
+                    pass
 
     @property
     def frame_count(self) -> int:
@@ -382,29 +322,11 @@ def _run_task_with_recording(
 ) -> dict[str, Any]:
     """跑完整任务并录制视频。返回 {success, duration_s, video_paths}。
 
-    关键：必须**先创建 GLFW 窗口**确立 GL context，**再** import + 构造
-    SimulationScene。否则 SimRGBDCamera 构造时 MjrContext 失败会污染 GL
-    状态，后续渲染全部 gladLoadGL error。
+    使用 mujoco.Renderer（EGL 软件渲染），无需 X server / GPU。
     """
     import math
     import threading
 
-    # 1. 先建 GLFW 隐藏窗口（确立当前线程的 GL context）
-    import glfw
-    if not glfw.init():
-        raise RuntimeError("GLFW 初始化失败")
-    glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
-    # 不指定 CONTEXT_VERSION — 让 GLFW 选择默认（兼容性最好，
-    # ARB_framebuffer_object 在大多数驱动上默认可用）
-    glfw_window = glfw.create_window(width, height, "offscreen", None, None)
-    if not glfw_window:
-        raise RuntimeError("GLFW 隐藏窗口创建失败")
-    glfw.make_context_current(glfw_window)
-    logger.info("[record] GLFW 隐藏窗口已创建（offscreen render）")
-
-    # 2. 现在才 import + 构造场景。
-    # 此时 GLFW window 已 make_current，SimRGBDCamera 构造时 MjrContext 会
-    # 成功创建（不再是 _ok=False 的哑对象）—— 感知管线也跟着恢复。
     from execution.sim_mujoco.scene import SimulationScene, SCENE_GOLF_BALL, SCENE_RAIN_INSPECT
 
     scene_obj = SimulationScene(config_path, render_mode="headless")
@@ -419,24 +341,12 @@ def _run_task_with_recording(
             return rgb
         return detector.annotate_frame(rgb)
 
-    # 4. 复用场景相机的 MjrContext（不要建第二个！否则同一 window 上
-    # 两个 MjrContext 会导致 segfault）。
-    cam_ctx = scene_obj.camera._context
-    if cam_ctx is None:
-        # 极端情况：相机 context 仍失败，recorder 自建兜底
-        recorder = TaskVideoRecorder(
-            scene_obj.robot.model, scene_obj.robot.data,
-            width=width, height=height, fps=fps, own_window=False,
-            annotate_fn=_annotate_fn,
-        )
-    else:
-        recorder = TaskVideoRecorder(
-            scene_obj.robot.model, scene_obj.robot.data,
-            width=width, height=height, fps=fps,
-            own_window=False, existing_context=cam_ctx,
-            annotate_fn=_annotate_fn,
-        )
-    recorder._glfw_window = glfw_window  # 让 close() 能正确清理
+    # 4. 创建视频录制器（mujoco.Renderer，自带 EGL context）
+    recorder = TaskVideoRecorder(
+        scene_obj.robot.model, scene_obj.robot.data,
+        width=width, height=height, fps=fps,
+        annotate_fn=_annotate_fn,
+    )
 
     result: dict[str, Any] = {
         "scene": scene, "config": config_path,
@@ -562,17 +472,9 @@ def _run_task_with_recording(
             recorder.frame_count, list(video_paths.keys()),
         )
     finally:
-        # 清理顺序：recorder（不释放 shared ctx）→ scene（释放 camera 的 ctx）→ glfw window
+        # 清理：recorder → scene
         recorder.close()
         scene_obj.stop()
-        try:
-            glfw.destroy_window(glfw_window)
-        except Exception:
-            pass
-        try:
-            glfw.terminate()
-        except Exception:
-            pass
 
     return result
 
