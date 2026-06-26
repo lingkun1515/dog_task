@@ -352,7 +352,7 @@ def _run_task_with_recording(
         """Capture frame with physics paused (avoid mj_step/data race → segfault)."""
         was_paused = scene_obj._physics_paused
         scene_obj._physics_paused = True
-        time.sleep(0.005)
+        time.sleep(0.002)
         try:
             recorder.capture_frame(phase_label=phase_label)
         finally:
