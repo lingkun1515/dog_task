@@ -229,7 +229,7 @@ class SimulationScene:
         # golf_ball 场景：已回收的目标体（用于 multi-grasp 进度）
         self._collected_targets: list[str] = []
         # loop 内是否渲染相机。视频录制时主线程负责渲染，应禁用避免跨线程 GL 冲突。
-        self._render_in_loop: bool = True
+        self._render_in_loop: bool = False  # EGL headless: Renderer context 绑定主线程, 后台线程渲染会 EGL_BAD_ACCESS 崩溃
         # 物理步进暂停标志：configure_scene / start_grasp 等需要直接写 qpos +
         # mj_forward 时，置 True 暂停 loop 的 mj_step，避免并发 segfault。
         self._physics_paused: bool = False
