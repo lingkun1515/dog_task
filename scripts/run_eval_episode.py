@@ -369,22 +369,18 @@ class EpisodeRunner:
                     self.episode_meta["duration_s"])
 
     def _safe_capture(self):
-        """Capture video frame with physics paused (avoid mj_step/data race).
+        """Capture video frame WITHOUT pausing physics.
 
-        Throttled to ~10fps: only captures every 3rd call.
+        Rendering reads data.xpos/xmat (updated by mj_step's internal mj_forward).
+        Concurrent read is safe — worst case 1-frame-stale, never segfault.
+        Pausing physics causes 3x slowdown → evaluation timeouts.
         """
         if not self.recorder:
             return
         self._capture_count = getattr(self, '_capture_count', 0) + 1
         if self._capture_count % 3 != 0:
             return
-        was_paused = self.scene._physics_paused
-        self.scene._physics_paused = True
-        time.sleep(0.002)
-        try:
-            self.recorder.capture_frame()
-        finally:
-            self.scene._physics_paused = was_paused
+        self.recorder.capture_frame()
 
     def _capture_state(self, phase: str):
         """采集当前状态。"""

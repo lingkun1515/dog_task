@@ -349,14 +349,14 @@ def _run_task_with_recording(
     )
 
     def _safe_capture(phase_label: str | None = None):
-        """Capture frame with physics paused (avoid mj_step/data race → segfault)."""
-        was_paused = scene_obj._physics_paused
-        scene_obj._physics_paused = True
-        time.sleep(0.002)
-        try:
-            recorder.capture_frame(phase_label=phase_label)
-        finally:
-            scene_obj._physics_paused = was_paused
+        """Capture frame WITHOUT pausing physics.
+
+        Rendering reads data.xpos/xmat (updated by mj_step's internal mj_forward).
+        Concurrent read during mj_step is safe for rendering — worst case a
+        1-frame-stale position, never a segfault. Pausing physics makes the
+        sim 3x slower, causing timeouts and missing grasp phase in video.
+        """
+        recorder.capture_frame(phase_label=phase_label)
 
     result: dict[str, Any] = {
         "scene": scene, "config": config_path,
