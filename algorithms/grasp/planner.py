@@ -85,6 +85,10 @@ class GraspPlanner:
         self._last_result: dict = {}
         self.reposition_fn: object = None  # Callable[[], None] | None
 
+        # 抓取验证：由 scene.py 注入，读取目标体世界 z 坐标
+        self.verify_grasp_fn: object = None
+        self._grasp_lift_z: float | None = None
+
     # ------------------------------------------------------------------
     # 状态查询
     # ------------------------------------------------------------------
@@ -262,6 +266,7 @@ class GraspPlanner:
             # === 7. 闭合夹爪（二次确保） ===
             self._state = GraspState.GRIPPING
             self._status_msg = "gripping"
+            self._record_grasp_baseline(best)
             self._executor.set_gripper(cfg.gripper_close)
             time.sleep(cfg.gripper_wait)
             self._executor.set_gripper(cfg.gripper_close)
@@ -284,19 +289,31 @@ class GraspPlanner:
             self._executor.move_to_joints(cfg.safe_park + [cfg.gripper_close], mode=1, wait_time=cfg.move_wait)
             self._executor.wait_until_reached(cfg.safe_park, threshold=3.0, timeout=10.0)
 
-            self._state = GraspState.SUCCESS
-            self._status_msg = "success"
-            self._last_result = {
-                "success": True,
-                "target": {
-                    "label": best.label,
-                    "conf": best.confidence,
-                    "pixel": list(best.center_pixel),
-                    "depth_m": best.depth_m,
-                    "arm_xyz": [round(float(v), 4) for v in target_arm],
-                },
-            }
-            logger.info("抓取完成")
+            # === 10. 验证抓取：目标体是否真的被提起 ===
+            lifted = self._verify_grasp(best)
+            if lifted:
+                self._state = GraspState.SUCCESS
+                self._status_msg = "success"
+                self._last_result = {
+                    "success": True,
+                    "target": {
+                        "label": best.label,
+                        "conf": best.confidence,
+                        "pixel": list(best.center_pixel),
+                        "depth_m": best.depth_m,
+                        "arm_xyz": [round(float(v), 4) for v in target_arm],
+                    },
+                }
+                logger.info("抓取完成（已验证：目标体上升）")
+            else:
+                self._state = GraspState.ERROR
+                self._status_msg = "grasp_verify_failed"
+                self._last_result = {
+                    "success": False,
+                    "error": "grasp_verify_failed",
+                    "message": "夹爪闭合但目标体未上升（未真正夹起）",
+                }
+                logger.warning("抓取验证失败：目标体未上升")
             return self._last_result
 
         return self._last_result
@@ -342,6 +359,38 @@ class GraspPlanner:
         logger.warning("IK 所有种子均失败: target_arm=%s, arm_base_world=%s",
                        target_xyz.tolist(), self._kinematics.arm_base_world_pos.tolist())
         return None
+
+    def _record_grasp_baseline(self, detection) -> None:
+        """夹爪闭合前记录目标体世界 z（通过 verify_grasp_fn 回调）。"""
+        if self.verify_grasp_fn is not None:
+            try:
+                z = self.verify_grasp_fn(action="baseline", body_name=detection.body_name)
+                if z is not None:
+                    self._grasp_lift_z = float(z)
+                    logger.info("[grasp_verify] baseline z=%.4f (body=%s)",
+                                self._grasp_lift_z, detection.body_name)
+            except Exception as e:
+                logger.debug("[grasp_verify] baseline exception: %s", e)
+
+    def _verify_grasp(self, detection) -> bool:
+        """提起后验证目标体是否上升（z delta > 0.03m）。无回调时视为成功。"""
+        if self.verify_grasp_fn is None:
+            return True
+        if self._grasp_lift_z is None:
+            logger.warning("[grasp_verify] no baseline z, skip")
+            return True
+        try:
+            z_after = float(self.verify_grasp_fn(action="check", body_name=detection.body_name))
+        except Exception as e:
+            logger.warning("[grasp_verify] check exception: %s", e)
+            return True
+        delta_z = z_after - self._grasp_lift_z
+        lifted = delta_z > 0.03
+        logger.info("[grasp_verify] base=%.4f after=%.4f dz=%.4f -> %s",
+                    self._grasp_lift_z, z_after, delta_z,
+                    "lifted" if lifted else "not_lifted")
+        self._grasp_lift_z = None
+        return lifted
 
     def _set_error(self, error: str, message: str) -> None:
         self._state = GraspState.ERROR

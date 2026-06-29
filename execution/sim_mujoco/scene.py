@@ -190,6 +190,7 @@ class SimulationScene:
         )
         # Wire up reposition callback for IK failure recovery
         self._algo_planner.reposition_fn = self._reposition_for_grasp
+        self._algo_planner.verify_grasp_fn = self._verify_grasp_lift
         logger.info("算法抓取管线已初始化 (与实机一致)")
 
         # ---- Sit-down pose for grasp precision ----
@@ -614,6 +615,18 @@ class SimulationScene:
     # ------------------------------------------------------------------
     # 抓取几何优化：最佳距离预计算 + 微调接近
     # ------------------------------------------------------------------
+    def _verify_grasp_lift(self, action: str, body_name: str | None = None) -> float | None:
+        """Grasp verification callback: read target body world z coordinate."""
+        import mujoco as _mj
+        if not body_name:
+            return None
+        bid = _mj.mj_name2id(self.robot.model, _mj.mjtObj.mjOBJ_BODY, body_name)
+        if bid < 0:
+            logger.warning("[grasp_verify] body %r not found", body_name)
+            return None
+        z = float(self.robot.data.xpos[bid][2])
+        return z
+
     def _calibrate_grasp_geometry(self) -> None:
         """坐下后校准 arm_base 相对 base 的偏移（用于计算最佳抓取停靠点）。
 
