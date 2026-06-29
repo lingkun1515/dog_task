@@ -126,6 +126,10 @@ class TaskVideoRecorder:
         self._third_frames: list[np.ndarray] = []
         self._front_frames: list[np.ndarray] = []
         self._phase_labels: list[tuple[int, str]] = []  # (frame_idx, label)
+        # 每帧的真实墙钟时间戳（秒），用于按真实播放速率写视频。
+        # self.fps 只是「目标采样率」，实际受渲染速度限制（软渲染 ~2fps），
+        # 若用固定 fps 写 VideoWriter 会把视频压缩/拉伸成错误时长。
+        self._frame_times: list[float] = []
 
         # PiP（画中画）配置：front cam 缩略图嵌入第三视角左上角
         self._pip_w = max(160, self.width // 4)   # PiP 宽度（默认主视频的 1/4）
@@ -175,6 +179,7 @@ class TaskVideoRecorder:
         front = self._render_front_annotated()
         if third is not None:
             self._third_frames.append(third)
+            self._frame_times.append(time.time())
             # 第一视角缺失时用黑帧占位，保持成对（注意尺寸用原生 front 分辨率）
             if front is not None:
                 self._front_frames.append(front)
@@ -187,7 +192,11 @@ class TaskVideoRecorder:
 
     def _draw_phase_overlay(self, frame: np.ndarray, idx: int) -> np.ndarray:
         """在帧上叠加阶段标签 + 时间戳 + 帧号。"""
-        ts = idx / self.fps if self.fps > 0 else 0
+        # 用真实墙钟时间戳，而不是帧号/fps（渲染慢导致 fps 不准）。
+        if self._frame_times and idx < len(self._frame_times):
+            ts = self._frame_times[idx] - self._frame_times[0]
+        else:
+            ts = idx / self.fps if self.fps > 0 else 0
         # 当前阶段
         current_phase = ""
         for fidx, label in self._phase_labels:
@@ -246,10 +255,17 @@ class TaskVideoRecorder:
             return result
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer = cv2.VideoWriter(str(out_path), fourcc, self.fps, (self.width, self.height))
-
+        # 按真实采集间隔计算播放帧率，避免把慢渲染压缩成超短视频。
         n = len(self._third_frames)
+        if len(self._frame_times) >= 2 and self._frame_times[-1] > self._frame_times[0]:
+            elapsed = self._frame_times[-1] - self._frame_times[0]
+            eff_fps = max(1.0, (n - 1) / elapsed)
+        else:
+            eff_fps = float(self.fps)
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(str(out_path), fourcc, eff_fps, (self.width, self.height))
+        logger.info("[save] %d 帧, 真实时长 %.1fs, 写入 fps=%.2f", n, elapsed if len(self._frame_times) >= 2 else 0.0, eff_fps)
+
         has_front = include_front and len(self._front_frames) == n
         for i in range(n):
             frame = self._third_frames[i].copy()
