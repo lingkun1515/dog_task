@@ -800,10 +800,10 @@ class SimulationScene:
             # 取消钉住当前目标（让 weld/物理接管）
             self.task_scene_mgr.unpin_body(current_body)
             # 缩小感知器目标集
-            self._sim_detector.set_targets(active_bodies, active_labels)
+            self._sim_detector.set_targets([current_body], [active_labels[0]])
             self._algo_planner._state = GS.IDLE
             logger.info("[golf] 第 %d/%d 个目标，剩余感知: %s",
-                        idx + 1, total, active_bodies)
+                        idx + 1, total, [current_body])
 
             self._algo_planner.execute_full_cycle()
             grasp_ok = self._algo_planner.state == GS.SUCCESS
