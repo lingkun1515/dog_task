@@ -774,7 +774,8 @@ class SimulationScene:
         total = len(self.task_scene_mgr.target_body_names)
         logger.info("开始多目标回收 (golf_ball): 共 %d 个目标", total)
 
-        # 多目标场景：禁用 reposition（站起/坐下太不稳定），IK 失败直接跳过
+        # 多目标场景：禁用 reposition（站起->坐下会致 Go2 翻倒）
+        # IK 失败时直接跳过当前目标，继续下一个（之前验证 5/5 成功的配置）
         original_reposition = self._algo_planner.reposition_fn
         self._algo_planner.reposition_fn = None
 
@@ -1019,15 +1020,16 @@ class SimulationScene:
         self._refresh_snapshot()
 
     def _reposition_for_grasp(self) -> None:
-        """Stand up → wait → sit down → wait to change arm-ball geometry on IK failure."""
-        logger.info("[reposition] 站起...")
-        self._sit_override = None
-        time.sleep(2.0)
-        logger.info("[reposition] 再次坐下...")
-        self._sit_override = self._sit_pose.copy()
-        time.sleep(2.5)
-        logger.info("[reposition] 坐下稳定，继续抓取")
+        """Keep seated, recalibrate grasp geometry, wait for stabilization.
 
+        Previously tried stand-up -> sit-down but this caused the Go2 to tip
+        over in deep2 sit pose. Instead: stay seated, recalibrate arm-base
+        offset, and let the caller re-detect the target on next attempt.
+        """
+        logger.info("[reposition] keep seated, recalibrating geometry...")
+        self._calibrate_grasp_geometry()
+        time.sleep(1.0)
+        logger.info("[reposition] calibration done, continuing")
     def stop_all(self) -> None:
         self.nav.cancel()
         self._algo_running = False
